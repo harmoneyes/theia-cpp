@@ -45,6 +45,16 @@ struct AttentionResult {
     int            total_observations = 0;
 };
 
+/// One loaded model's identity.
+struct ModelInfo {
+    std::string   name;
+    std::uint32_t version = 0;
+    std::string   commit;
+};
+
+/// A labelled instant, for baselining and refining.
+using GroundTruthPoint = ::ground_truth_point_t;
+
 /// How cognitive load was distributed over the session.
 struct MentalReadinessResult {
     double low_percentage      = 0.0;
@@ -156,19 +166,128 @@ public:
         add_gaze_samples(samples.data(), samples.size());
     }
 
-    // Polling getters. Each returns the latest result and clears it, so a
-    // second call before the next window returns nothing.
+    // Polling getters. Two of them consume, two do not, which the library
+    // decides and this cannot change.
+    //
+    // cog_load() and fatigue() are event streams: each returns the latest
+    // result and CLEARS it, so a second call before the next window returns
+    // nothing.
+    //
+    // attention() and mental_readiness() are rolling state: they return the
+    // current classification every time they are called and clear nothing.
+    // Reading the same value twice means no new window has landed, not that a
+    // new window agreed with the last one.
     [[nodiscard]] std::optional<CogLoadResult>         cog_load() const;
     [[nodiscard]] std::optional<FatigueResult>         fatigue() const;
     [[nodiscard]] std::optional<AttentionResult>       attention() const;
     [[nodiscard]] std::optional<MentalReadinessResult> mental_readiness(double elapsed_seconds = 0.0) const;
 
+    /// Every cognitive-load prediction so far, oldest first.
+    [[nodiscard]] std::vector<CogLoadResult> cog_load_history() const;
+
     // Tracker control, for devices the library connects to itself.
+
+    /// Point the SDK at a Ganzin Sol. Ganzin has no discovery, so this must be
+    /// called before start_data_streaming(). `port` is the HTTP control port,
+    /// `rtsp_port` the stream. Recorded but unused for other devices.
+    void set_ganzin_connection(const std::string& ip, int port = 8080, int rtsp_port = 8086);
+
+    /// Pin which Tobii Pro Glasses 3 to use. Optional: G3 advertises itself
+    /// over mDNS, and an empty `ip` takes the first device that answers. Set
+    /// it to choose between several, or where multicast is blocked.
+    void set_tobii_g3_connection(const std::string& ip = {}, int port = 80, int rtsp_port = 8554);
+
+    /// Set the G3's device-side gaze rate, 50 or 100 Hz. Returns false if the
+    /// library rejected it. Anything other than 50 or 100 is rejected rather
+    /// than clamped, because a wrong rate quietly degrades every eye-movement
+    /// feature. Must be called before start_session().
+    ///
+    /// **100 Hz leaves the legacy feature extractor behind.** That extractor
+    /// captures the nominal sample rate when the SDK is constructed, and the C
+    /// ABI's options_t carries no field for the G3 rate, so it is always built
+    /// for the 50 Hz default. Raising the rate afterwards switches the device
+    /// and the ACE pipeline but not the extractor, and the library only warns
+    /// about the mismatch when the device *refuses* the rate -- so the case
+    /// that goes wrong is the one that appears to succeed. Until the C ABI can
+    /// carry the rate at construction, prefer 50 Hz, or disable legacy feature
+    /// extraction and rely on the ACE outputs alone.
+    [[nodiscard]] bool set_tobii_g3_gaze_frequency(int hz);
+
+    /// Run the G3's own calibration. Returns whether the device accepted it.
+    [[nodiscard]] bool calibrate_tobii_g3();
+
     void start_data_streaming();
     void stop_data_streaming();
     [[nodiscard]] bool is_tracker_connected() const;
+
+    /// Whether samples are actually arriving.
+    ///
+    /// Distinct from is_tracker_connected(): a device can stay connected while
+    /// producing nothing, which reads as healthy if you only ask the former.
+    [[nodiscard]] bool is_tracker_streaming() const;
+
     [[nodiscard]] bool is_running() const;
     [[nodiscard]] int  batch_count() const;
+    [[nodiscard]] int  batch_size() const;
+    [[nodiscard]] bool has_connection_timeout() const;
+
+    // Scene video, for trackers that provide it. Frames are pulled, not
+    // pushed; video_frame() returns nothing until one is available.
+    void start_video();
+    void stop_video();
+    [[nodiscard]] bool is_video_streaming() const;
+    [[nodiscard]] std::optional<VideoFrame> video_frame() const;
+
+    // Eye-camera video, same shape as the scene calls above.
+    void start_eye_video();
+    void stop_eye_video();
+    [[nodiscard]] bool is_eye_video_streaming() const;
+    [[nodiscard]] std::optional<VideoFrame> eye_video_frame() const;
+
+    // Tuning. All of these take effect from the next window.
+
+    /// Shift the clock the fatigue model reads time-of-day from.
+    ///
+    /// The model encodes time of day, so a recording replayed at a different
+    /// hour than it was captured scores differently. Set this per session when
+    /// replaying, as the Python SDK's own documentation also advises.
+    void set_fatigue_time_offset_seconds(double seconds);
+
+    /// How long a session must run before mental readiness reports anything.
+    void set_mental_readiness_min_session_seconds(double seconds);
+    void set_mental_readiness_low_high_threshold(double threshold);
+    void set_mental_readiness_report_windows(const std::vector<double>& nominal_window_seconds);
+
+    void set_window_size(float seconds);
+    void set_graph_start_time(double unix_seconds);
+    void set_sdk_model_confidence_threshold(float threshold);
+    void set_cog_load_model_settings(int consensus_window_size, float consensus_threshold,
+                                     float low_confidence_threshold,
+                                     float high_confidence_threshold);
+
+    // Session metadata, recorded alongside the results.
+    void set_profile(const std::string& profile_name);
+    void set_task(const std::string& task_name);
+    void set_environment(const std::string& environment_name);
+    void set_lambda_url(const std::string& url);
+    [[nodiscard]] std::string profile() const;
+    [[nodiscard]] std::string task() const;
+    [[nodiscard]] std::string environment() const;
+
+    /// Which models are loaded, and at what version.
+    [[nodiscard]] std::vector<ModelInfo> model_info() const;
+
+    // Personalising the cognitive-load model to one person.
+    void process_baselining_data(double start_time_sec, double end_time_sec,
+                                 const std::vector<GroundTruthPoint>& ground_truth);
+    void process_general_model_baseline(double easy_start, double easy_end, double hard_start,
+                                        double hard_end, int easy_gt, int hard_gt);
+    void process_refining_data(const std::vector<GroundTruthPoint>& ground_truth,
+                               double baselining_end_time, const std::string& refining_model);
+    void set_refine_settings(float growth_rate, double lookback_seconds, float refine_eta);
+    void save_refined_model(const std::string& path) const;
+    void load_refined_model(const std::string& path);
+    void reset_to_base_model();
 
     // Alert rules.
     void set_alert_rules(const std::string& rules_json);
@@ -435,7 +554,7 @@ inline void TheiaSDK::add_gaze_samples(const GazeSample* first, std::size_t coun
     if (count == 0) { return; }
     // The C ABI takes a non-const pointer but does not write through it: it
     // copies each field into its own vector and applies sentinel rewrites
-    // there. Verified in theia_export.cpp's add_gaze_samples body.
+    // there.
     detail::check(::theia_sdk_add_gaze_samples(handle(), const_cast<GazeSample*>(first), count),
                   "theia_sdk_add_gaze_samples");
 }
@@ -458,10 +577,18 @@ inline std::optional<FatigueResult> TheiaSDK::fatigue() const
     return detail::to_fatigue(c);
 }
 
+// The ACE entry points, not the legacy ones, because that is what the Python
+// SDK calls. The library keeps two of each: theia_sdk_get_attention reads a
+// classification produced by the legacy 82-feature extractor on the legacy
+// batch cadence, while theia_sdk_get_attention_ace reads the one produced per
+// ACE window. Mental readiness likewise has two separate accumulators. Calling
+// the legacy pair here would return different numbers from the identically
+// named Python calls, with nothing to indicate it.
 inline std::optional<AttentionResult> TheiaSDK::attention() const
 {
     ::attention_result_t c{};
-    if (!detail::check_optional(::theia_sdk_get_attention(handle(), &c), "theia_sdk_get_attention")) {
+    if (!detail::check_optional(::theia_sdk_get_attention_ace(handle(), &c),
+                                "theia_sdk_get_attention_ace")) {
         return std::nullopt;
     }
     return detail::to_attention(c);
@@ -470,11 +597,51 @@ inline std::optional<AttentionResult> TheiaSDK::attention() const
 inline std::optional<MentalReadinessResult> TheiaSDK::mental_readiness(double elapsed_seconds) const
 {
     ::mental_readiness_result_t c{};
-    if (!detail::check_optional(::theia_sdk_get_mental_readiness(handle(), elapsed_seconds, &c),
-                                "theia_sdk_get_mental_readiness")) {
+    if (!detail::check_optional(
+            ::theia_sdk_get_mental_readiness_ace(handle(), elapsed_seconds, &c),
+            "theia_sdk_get_mental_readiness_ace")) {
         return std::nullopt;
     }
     return detail::to_mental_readiness(c);
+}
+
+inline std::vector<CogLoadResult> TheiaSDK::cog_load_history() const
+{
+    const ::cog_load_result_t* items = nullptr;
+    std::size_t                count = 0;
+    detail::check(::theia_sdk_get_cog_load_prediction_history(handle(), &items, &count),
+                  "theia_sdk_get_cog_load_prediction_history");
+
+    // Copied immediately: the array and every string in it live in a
+    // thread-local buffer the next call on this thread overwrites.
+    std::vector<CogLoadResult> out;
+    out.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) { out.push_back(detail::to_cog_load(items[i])); }
+    return out;
+}
+
+inline void TheiaSDK::set_ganzin_connection(const std::string& ip, int port, int rtsp_port)
+{
+    detail::check(::theia_sdk_set_ganzin_connection(handle(), ip.c_str(), port, rtsp_port),
+                  "theia_sdk_set_ganzin_connection");
+}
+
+inline void TheiaSDK::set_tobii_g3_connection(const std::string& ip, int port, int rtsp_port)
+{
+    detail::check(::theia_sdk_set_tobii_g3_connection(handle(), ip.c_str(), port, rtsp_port),
+                  "theia_sdk_set_tobii_g3_connection");
+}
+
+inline bool TheiaSDK::set_tobii_g3_gaze_frequency(int hz)
+{
+    return detail::check_bool(::theia_sdk_set_tobii_g3_gaze_frequency(handle(), hz),
+                              "theia_sdk_set_tobii_g3_gaze_frequency");
+}
+
+inline bool TheiaSDK::calibrate_tobii_g3()
+{
+    return detail::check_bool(::theia_sdk_calibrate_tobii_g3(handle()),
+                              "theia_sdk_calibrate_tobii_g3");
 }
 
 inline void TheiaSDK::start_data_streaming()
@@ -500,6 +667,263 @@ inline bool TheiaSDK::is_running() const
 inline int TheiaSDK::batch_count() const
 {
     return detail::check_count(::theia_sdk_batch_count(handle()), "theia_sdk_batch_count");
+}
+
+inline bool TheiaSDK::is_tracker_streaming() const
+{
+    return detail::check_bool(::theia_sdk_is_tracker_streaming(handle()),
+                              "theia_sdk_is_tracker_streaming");
+}
+
+inline int TheiaSDK::batch_size() const
+{
+    return detail::check_count(::theia_sdk_batch_size(handle()), "theia_sdk_batch_size");
+}
+
+inline bool TheiaSDK::has_connection_timeout() const
+{
+    return detail::check_bool(::theia_sdk_has_connection_timeout(handle()),
+                              "theia_sdk_has_connection_timeout");
+}
+
+namespace detail {
+
+/// Copy a video_frame_t out of the library's thread-local buffers.
+[[nodiscard]] inline VideoFrame to_video_frame(const ::video_frame_t& c)
+{
+    const auto copy = [](const std::uint8_t* data, std::size_t len) {
+        return (data != nullptr && len != 0) ? std::vector<std::uint8_t>{data, data + len}
+                                             : std::vector<std::uint8_t>{};
+    };
+
+    VideoFrame f;
+    f.bgr_data               = copy(c.bgr_data, c.bgr_data_len);
+    f.encoded_data           = copy(c.encoded_data, c.encoded_data_len);
+    f.extradata              = copy(c.extradata, c.extradata_len);
+    f.width                  = c.width;
+    f.height                 = c.height;
+    f.timestamp_unix_seconds = c.timestamp_unix_seconds;
+    f.is_keyframe            = c.is_keyframe == 1;
+    return f;
+}
+
+}  // namespace detail
+
+inline void TheiaSDK::start_video()
+{
+    detail::check(::theia_sdk_start_video(handle()), "theia_sdk_start_video");
+}
+
+inline void TheiaSDK::stop_video()
+{
+    detail::check(::theia_sdk_stop_video(handle()), "theia_sdk_stop_video");
+}
+
+inline bool TheiaSDK::is_video_streaming() const
+{
+    return detail::check_bool(::theia_sdk_is_video_streaming(handle()),
+                              "theia_sdk_is_video_streaming");
+}
+
+inline std::optional<VideoFrame> TheiaSDK::video_frame() const
+{
+    ::video_frame_t c{};
+    if (!detail::check_optional(::theia_sdk_get_video_frame(handle(), &c),
+                                "theia_sdk_get_video_frame")) {
+        return std::nullopt;
+    }
+    return detail::to_video_frame(c);
+}
+
+inline void TheiaSDK::start_eye_video()
+{
+    detail::check(::theia_sdk_start_eye_video(handle()), "theia_sdk_start_eye_video");
+}
+
+inline void TheiaSDK::stop_eye_video()
+{
+    detail::check(::theia_sdk_stop_eye_video(handle()), "theia_sdk_stop_eye_video");
+}
+
+inline bool TheiaSDK::is_eye_video_streaming() const
+{
+    return detail::check_bool(::theia_sdk_is_eye_video_streaming(handle()),
+                              "theia_sdk_is_eye_video_streaming");
+}
+
+inline std::optional<VideoFrame> TheiaSDK::eye_video_frame() const
+{
+    ::video_frame_t c{};
+    if (!detail::check_optional(::theia_sdk_get_eye_video_frame(handle(), &c),
+                                "theia_sdk_get_eye_video_frame")) {
+        return std::nullopt;
+    }
+    return detail::to_video_frame(c);
+}
+
+inline void TheiaSDK::set_fatigue_time_offset_seconds(double seconds)
+{
+    detail::check(::theia_sdk_set_fatigue_time_offset_seconds(handle(), seconds),
+                  "theia_sdk_set_fatigue_time_offset_seconds");
+}
+
+inline void TheiaSDK::set_mental_readiness_min_session_seconds(double seconds)
+{
+    detail::check(::theia_sdk_set_mental_readiness_min_session_seconds(handle(), seconds),
+                  "theia_sdk_set_mental_readiness_min_session_seconds");
+}
+
+inline void TheiaSDK::set_mental_readiness_low_high_threshold(double threshold)
+{
+    detail::check(::theia_sdk_set_mental_readiness_low_high_threshold(handle(), threshold),
+                  "theia_sdk_set_mental_readiness_low_high_threshold");
+}
+
+inline void TheiaSDK::set_mental_readiness_report_windows(
+    const std::vector<double>& nominal_window_seconds)
+{
+    // The C ABI takes a non-const pointer but copies out of it, the same as
+    // add_gaze_samples. An empty list must not dereference .data().
+    detail::check(::theia_sdk_set_mental_readiness_report_windows(
+                      handle(), const_cast<double*>(nominal_window_seconds.data()),
+                      nominal_window_seconds.size()),
+                  "theia_sdk_set_mental_readiness_report_windows");
+}
+
+inline void TheiaSDK::set_window_size(float seconds)
+{
+    detail::check(::theia_sdk_set_window_size(handle(), seconds), "theia_sdk_set_window_size");
+}
+
+inline void TheiaSDK::set_graph_start_time(double unix_seconds)
+{
+    detail::check(::theia_sdk_set_graph_start_time(handle(), unix_seconds),
+                  "theia_sdk_set_graph_start_time");
+}
+
+inline void TheiaSDK::set_sdk_model_confidence_threshold(float threshold)
+{
+    detail::check(::theia_sdk_set_sdk_model_confidence_threshold(handle(), threshold),
+                  "theia_sdk_set_sdk_model_confidence_threshold");
+}
+
+inline void TheiaSDK::set_cog_load_model_settings(int consensus_window_size,
+                                                  float consensus_threshold,
+                                                  float low_confidence_threshold,
+                                                  float high_confidence_threshold)
+{
+    detail::check(::theia_sdk_set_cog_load_model_settings(handle(), consensus_window_size,
+                                                          consensus_threshold,
+                                                          low_confidence_threshold,
+                                                          high_confidence_threshold),
+                  "theia_sdk_set_cog_load_model_settings");
+}
+
+inline void TheiaSDK::set_profile(const std::string& profile_name)
+{
+    detail::check(::theia_sdk_set_profile(handle(), profile_name.c_str()), "theia_sdk_set_profile");
+}
+
+inline void TheiaSDK::set_task(const std::string& task_name)
+{
+    detail::check(::theia_sdk_set_task(handle(), task_name.c_str()), "theia_sdk_set_task");
+}
+
+inline void TheiaSDK::set_environment(const std::string& environment_name)
+{
+    detail::check(::theia_sdk_set_environment(handle(), environment_name.c_str()),
+                  "theia_sdk_set_environment");
+}
+
+inline void TheiaSDK::set_lambda_url(const std::string& url)
+{
+    detail::check(::theia_sdk_set_lambda_url(handle(), url.c_str()), "theia_sdk_set_lambda_url");
+}
+
+inline std::string TheiaSDK::profile() const
+{
+    return detail::copy_borrowed(::theia_sdk_get_profile(handle()));
+}
+
+inline std::string TheiaSDK::task() const
+{
+    return detail::copy_borrowed(::theia_sdk_get_task(handle()));
+}
+
+inline std::string TheiaSDK::environment() const
+{
+    return detail::copy_borrowed(::theia_sdk_get_environment(handle()));
+}
+
+inline std::vector<ModelInfo> TheiaSDK::model_info() const
+{
+    const ::model_info_t* items = nullptr;
+    std::size_t           count = 0;
+    detail::check(::theia_sdk_get_model_info(handle(), &items, &count),
+                  "theia_sdk_get_model_info");
+
+    // Copied immediately: thread-local buffer, overwritten by the next call.
+    std::vector<ModelInfo> out;
+    out.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        out.push_back(ModelInfo{detail::copy_borrowed(items[i].name), items[i].version,
+                                detail::copy_borrowed(items[i].commit)});
+    }
+    return out;
+}
+
+inline void TheiaSDK::process_baselining_data(double start_time_sec, double end_time_sec,
+                                              const std::vector<GroundTruthPoint>& ground_truth)
+{
+    detail::check(::theia_sdk_process_baselining_data(
+                      handle(), start_time_sec, end_time_sec,
+                      const_cast<GroundTruthPoint*>(ground_truth.data()), ground_truth.size()),
+                  "theia_sdk_process_baselining_data");
+}
+
+inline void TheiaSDK::process_general_model_baseline(double easy_start, double easy_end,
+                                                     double hard_start, double hard_end,
+                                                     int easy_gt, int hard_gt)
+{
+    detail::check(::theia_sdk_process_general_model_baseline(handle(), easy_start, easy_end,
+                                                             hard_start, hard_end, easy_gt,
+                                                             hard_gt),
+                  "theia_sdk_process_general_model_baseline");
+}
+
+inline void TheiaSDK::process_refining_data(const std::vector<GroundTruthPoint>& ground_truth,
+                                            double             baselining_end_time,
+                                            const std::string& refining_model)
+{
+    detail::check(::theia_sdk_process_refining_data(
+                      handle(), const_cast<GroundTruthPoint*>(ground_truth.data()),
+                      ground_truth.size(), baselining_end_time, refining_model.c_str()),
+                  "theia_sdk_process_refining_data");
+}
+
+inline void TheiaSDK::set_refine_settings(float growth_rate, double lookback_seconds,
+                                          float refine_eta)
+{
+    detail::check(::theia_sdk_set_refine_settings(handle(), growth_rate, lookback_seconds,
+                                                  refine_eta),
+                  "theia_sdk_set_refine_settings");
+}
+
+inline void TheiaSDK::save_refined_model(const std::string& path) const
+{
+    detail::check(::theia_sdk_save_refined_model(handle(), path.c_str()),
+                  "theia_sdk_save_refined_model");
+}
+
+inline void TheiaSDK::load_refined_model(const std::string& path)
+{
+    detail::check(::theia_sdk_load_refined_model(handle(), path.c_str()),
+                  "theia_sdk_load_refined_model");
+}
+
+inline void TheiaSDK::reset_to_base_model()
+{
+    detail::check(::theia_sdk_reset_to_base_model(handle()), "theia_sdk_reset_to_base_model");
 }
 
 inline void TheiaSDK::set_alert_rules(const std::string& rules_json)

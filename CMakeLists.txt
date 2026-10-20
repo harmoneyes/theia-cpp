@@ -21,7 +21,6 @@ else()
 endif()
 
 option(HARMONEYES_NATIVE_BUILD_EXAMPLES "Build the bundled examples" ${_hen_is_top})
-option(HARMONEYES_NATIVE_BUILD_TESTS    "Build the test suite"       OFF)
 
 # Deliberately via find_package rather than a direct include: building from a
 # clone then exercises the same discovery path a customer uses, so a broken
@@ -32,11 +31,6 @@ find_package(HarmonEyesNative REQUIRED CONFIG
 
 if(HARMONEYES_NATIVE_BUILD_EXAMPLES AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/examples/CMakeLists.txt")
     add_subdirectory(examples)
-endif()
-
-if(HARMONEYES_NATIVE_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/tests/CMakeLists.txt")
-    enable_testing()
-    add_subdirectory(tests)
 endif()
 
 unset(_hen_is_top)

@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -154,9 +155,9 @@ private:
 
         std::unordered_map<std::string, std::size_t> index;
         for (std::size_t i = 0; i < columns.size(); ++i) { index[columns[i]] = i; }
-        if (index.count("timestamp") == 0) {
+        if (index.count("timestamp") == 0 && index.count("timestamp_ns") == 0) {
             throw std::runtime_error("DefaultTracker: " + path.string() +
-                                     " has no 'timestamp' column");
+                                     " has no 'timestamp' or 'timestamp_ns' column");
         }
 
         std::string row;
@@ -171,13 +172,36 @@ private:
                        to_double(cells[it->second], value);
             };
 
-            // Parsed as an integer, not through a double: nanoseconds since
-            // the epoch exceed what a double represents exactly, and a silent
-            // shift of a hundred-odd nanoseconds is the kind of thing that
-            // breaks a golden-fixture comparison for no reason.
-            const auto ts_cell = index.find("timestamp");
-            if (ts_cell == index.end() || ts_cell->second >= cells.size()) { continue; }
-            const auto ts = detail::parse_int64(cells[ts_cell->second]);
+            // `timestamp` is MILLISECONDS, written as a float
+            // ("1787694423228.0"). That is the SDK's own output convention:
+            // the Python SDK converts the same column with
+            // `timestamp_ns = int(float(ts) * 1_000_000)` (_core.py). Reading
+            // it as nanoseconds puts every recording a million times too close
+            // together, and parsing it as an integer rejects the ".0" and
+            // replays the file as empty.
+            //
+            // A `timestamp_ns` column, where a producer writes one, is already
+            // in nanoseconds and wins.
+            //
+            // Scaled digit by digit rather than through a double, because
+            // epoch nanoseconds exceed what a double represents exactly and a
+            // silent shift of a few hundred nanoseconds is the kind of thing
+            // that breaks a golden-fixture comparison for no reason.
+            // Tried in order rather than chosen by which column exists: a file
+            // carrying both, which is what a producer mid-migration writes,
+            // would otherwise replay as nothing at all if timestamp_ns is
+            // blank on every row.
+            std::optional<std::int64_t> ts;
+            if (const auto ns_cell = index.find("timestamp_ns");
+                ns_cell != index.end() && ns_cell->second < cells.size()) {
+                ts = detail::parse_scaled(cells[ns_cell->second], 0);
+            }
+            if (!ts) {
+                if (const auto ms_cell = index.find("timestamp");
+                    ms_cell != index.end() && ms_cell->second < cells.size()) {
+                    ts = detail::parse_scaled(cells[ms_cell->second], 6);
+                }
+            }
             if (!ts) { continue; }
             s.timestamp_ns = *ts;
 

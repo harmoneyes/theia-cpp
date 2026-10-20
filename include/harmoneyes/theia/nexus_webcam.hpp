@@ -26,9 +26,17 @@ namespace harmoneyes::theia::nexus {
 /// UTF-16LE bytes, which is why decoding is part of this type rather than
 /// something callers are left to work out.
 ///
+/// **It must be a SIGNED licence, not the issued `.bytes` file.** The engine
+/// uses two-tier signing: the issued file carries Tobii's `--SE-SIGNATURE--`
+/// over terms valid for a year or more, and a signing service must append a
+/// short-lived `--LICENSEE-BODY--` plus `--LICENSEE-SIGNATURE--` per session.
+/// Handing the engine the issued file alone fails with
+/// `LICENSE_VALIDATION_RESULT_TAMPERED`, which reads like a corrupt file but
+/// means the second signature is simply absent.
+///
 /// Fetching it over HTTP is deliberately not built in: a header-only SDK
-/// should not oblige every consumer to link an HTTP stack. Fetch it however
-/// suits you and hand the bytes over.
+/// should not oblige every consumer to link an HTTP stack. Get a signed
+/// licence from your signing endpoint and hand the bytes over.
 class TobiiLicense {
 public:
     TobiiLicense() = default;
@@ -93,7 +101,7 @@ private:
 
 /// Webcam gaze, by hosting the Tobii Nexus engine in a Node sidecar.
 ///
-/// theia-native does not estimate gaze from a camera: it consumes samples
+/// The native library does not estimate gaze from a camera: it consumes samples
 /// someone else produced. The engine that does the estimating is a WASM module
 /// with no C++ binding, hosted by a small Node process that streams gaze back
 /// as newline-delimited JSON. This class owns that process.

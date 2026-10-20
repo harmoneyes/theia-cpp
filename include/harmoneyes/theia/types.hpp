@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
+#include <vector>
 
 #include "harmoneyes/theia/detail/c_api.hpp"
 
@@ -173,6 +174,22 @@ static_assert(offsetof(GazeSample, head_pose_tz) == 216,
 /// (screen_width_mm, screen_res_width_px and friends), not here.
 struct Config {
     DeviceType device = DeviceType::PupilLabsNeon;
+};
+
+/// One video frame, owning its bytes.
+///
+/// The C ABI fills a video_frame_t with pointers into a thread-local buffer
+/// that the next call on the same thread overwrites, so this copies rather
+/// than borrows. A frame carries raw BGR, an encoded packet, or both,
+/// depending on what the tracker provides; either vector may be empty.
+struct VideoFrame {
+    std::vector<std::uint8_t> bgr_data;
+    std::vector<std::uint8_t> encoded_data;
+    std::vector<std::uint8_t> extradata;
+    int    width                  = 0;
+    int    height                 = 0;
+    double timestamp_unix_seconds = 0.0;
+    bool   is_keyframe            = false;
 };
 
 }  // namespace harmoneyes::theia

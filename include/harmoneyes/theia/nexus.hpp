@@ -22,8 +22,8 @@ struct Gaze {
 ///
 /// This is the piece that decides whether webcam features are meaningful, and
 /// it is easy to get wrong in a way that looks fine. The feature pipeline
-/// computes every angular feature from `gaze_x_norm` / `gaze_y_norm`
-/// (ace/src/devices/device_models/nexus_device.cpp). If only pixel coordinates
+/// computes every angular feature from `gaze_x_norm` / `gaze_y_norm`. If
+/// only pixel coordinates
 /// are filled, a fallback still marks the sample valid, so the stream looks
 /// healthy while azimuth and elevation come out NaN and every angular feature
 /// degrades to the non-compute sentinel.

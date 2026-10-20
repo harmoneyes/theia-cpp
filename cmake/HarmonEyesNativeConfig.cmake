@@ -94,6 +94,18 @@ endif()
 # each binary, so EXISTS alone cannot tell "absent" from "not fetched".
 function(_hen_require_binary path what)
     if(NOT EXISTS "${path}")
+        # Two very different causes, and telling a customer to run `git lfs
+        # pull` when the platform was never built sends them hunting for a
+        # problem on their machine. The directory's presence separates them.
+        get_filename_component(_hen_platform_dir "${path}" DIRECTORY)
+        if(NOT EXISTS "${_hen_platform_dir}")
+            message(FATAL_ERROR
+                "HarmonEyesNative: this release does not ship a build for "
+                "${HarmonEyesNative_PLATFORM}.\n"
+                "  expected: ${path}\n"
+                "See the platform table in README.md for what is currently "
+                "published, and contact sales@harmoneyes.com if you need this one.")
+        endif()
         message(FATAL_ERROR
             "HarmonEyesNative: no vendored ${what} for ${HarmonEyesNative_PLATFORM}.\n"
             "  expected: ${path}\n"
@@ -133,8 +145,7 @@ if(NOT TARGET HarmonEyesNative::theia)
     endif()
 
     if(UNIX)
-        # Matches the only documented consumer link line upstream,
-        # theia-native/tools/test-apps/build_and_run_cpp.sh:16-24.
+        # The library needs these three at link time on every Unix.
         find_dependency(Threads)
         set_property(TARGET HarmonEyesNative::theia APPEND PROPERTY
             INTERFACE_LINK_LIBRARIES Threads::Threads ${CMAKE_DL_LIBS} m)
