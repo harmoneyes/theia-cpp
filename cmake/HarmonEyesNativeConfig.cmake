@@ -90,23 +90,30 @@ if(IS_DIRECTORY "${HARMONEYES_NATIVE_ROOT}/include")
     list(PREPEND _hen_includes "${HARMONEYES_NATIVE_ROOT}/include")
 endif()
 
-if(NOT EXISTS "${_hen_libpath}")
-    message(FATAL_ERROR
-        "HarmonEyesNative: no vendored library for ${_hen_platform}.\n"
-        "  expected: ${_hen_libpath}\n"
-        "This repository stores its binaries with Git LFS. On a fresh clone run:\n"
-        "  git lfs install && git lfs pull")
-endif()
+# A clone without Git LFS smudging leaves a ~130-byte text pointer in place of
+# each binary, so EXISTS alone cannot tell "absent" from "not fetched".
+function(_hen_require_binary path what)
+    if(NOT EXISTS "${path}")
+        message(FATAL_ERROR
+            "HarmonEyesNative: no vendored ${what} for ${HarmonEyesNative_PLATFORM}.\n"
+            "  expected: ${path}\n"
+            "This repository stores its binaries with Git LFS. On a fresh clone run:\n"
+            "  git lfs install && git lfs pull")
+    endif()
+    file(SIZE "${path}" _size)
+    if(_size LESS 4096)
+        message(FATAL_ERROR
+            "HarmonEyesNative: ${what} is a Git LFS pointer (${_size} bytes), not the "
+            "real binary.\n  ${path}\nRun: git lfs install && git lfs pull")
+    endif()
+endfunction()
+
+_hen_require_binary("${_hen_libpath}" "library")
 
 # Windows cannot link a bare DLL; CMake requires the import library.
 if(_hen_implib)
     set(_hen_implibpath "${_hen_libdir}/${_hen_implib}")
-    if(NOT EXISTS "${_hen_implibpath}")
-        message(FATAL_ERROR
-            "HarmonEyesNative: ${_hen_implib} is missing from ${_hen_libdir}.\n"
-            "A DLL alone cannot be linked against. The import library must be "
-            "vendored alongside it.")
-    endif()
+    _hen_require_binary("${_hen_implibpath}" "import library (${_hen_implib})")
 endif()
 
 # --- the imported target -----------------------------------------------------
@@ -116,7 +123,9 @@ if(NOT TARGET HarmonEyesNative::theia)
 
     set_target_properties(HarmonEyesNative::theia PROPERTIES
         IMPORTED_LOCATION             "${_hen_libpath}"
-        INTERFACE_INCLUDE_DIRECTORIES "${_hen_includes}")
+        INTERFACE_INCLUDE_DIRECTORIES "${_hen_includes}"
+        INTERFACE_COMPILE_FEATURES    cxx_std_17
+        INTERFACE_COMPILE_DEFINITIONS THEIA_HAS_PUPIL_LABS)
 
     if(_hen_implib)
         set_target_properties(HarmonEyesNative::theia PROPERTIES
@@ -137,6 +146,10 @@ endif()
 # The Python SDK loads its binary by absolute path, so it never needs a search
 # path. CMake has no equivalent, so consumers call this to put the shared
 # library next to their executable and set a relative rpath.
+#
+# This covers the BUILD tree only. Shipping the library with an installed
+# binary is the consumer's job:
+#   install(FILES $<TARGET_FILE:HarmonEyesNative::theia> DESTINATION bin)
 function(harmoneyes_native_copy_runtime target)
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different

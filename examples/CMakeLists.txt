@@ -1,0 +1,3 @@
+add_executable(print_version print_version.cpp)
+target_link_libraries(print_version PRIVATE HarmonEyesNative::theia)
+harmoneyes_native_copy_runtime(print_version)
