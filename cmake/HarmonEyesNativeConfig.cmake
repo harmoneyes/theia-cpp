@@ -37,12 +37,15 @@ endif()
 set(_hen_implib "")
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # The library carries SONAME "libtheia.so.0", so that is the name an
+    # executable records in DT_NEEDED and the name the loader searches for at
+    # runtime. Vendor and reference it under the SONAME, not "libtheia.so".
     if(_hen_arch MATCHES "^(x86_64|AMD64|amd64)$")
         set(_hen_platform "linux-x86_64")
-        set(_hen_libname  "libtheia.so")
+        set(_hen_libname  "libtheia.so.0")
     elseif(_hen_arch MATCHES "^(aarch64|arm64)$")
         set(_hen_platform "linux-aarch64")
-        set(_hen_libname  "libtheia.so")
+        set(_hen_libname  "libtheia.so.0")
     else()
         message(FATAL_ERROR
             "HarmonEyesNative: unsupported Linux architecture: ${_hen_arch}. "
@@ -77,8 +80,15 @@ set(HarmonEyesNative_PLATFORM "${_hen_platform}")
 
 set(_hen_libdir  "${HARMONEYES_NATIVE_ROOT}/vendor/${_hen_platform}")
 set(_hen_libpath "${_hen_libdir}/${_hen_libname}")
-set(_hen_incdir  "${HARMONEYES_NATIVE_ROOT}/include")
 set(_hen_cincdir "${HARMONEYES_NATIVE_ROOT}/vendor/include")
+
+# The header-only C++ layer. Listed only when present: CMake rejects a
+# non-existent path in INTERFACE_INCLUDE_DIRECTORIES, and vendoring the
+# library is a separate step from shipping the headers.
+set(_hen_includes "${_hen_cincdir}")
+if(IS_DIRECTORY "${HARMONEYES_NATIVE_ROOT}/include")
+    list(PREPEND _hen_includes "${HARMONEYES_NATIVE_ROOT}/include")
+endif()
 
 if(NOT EXISTS "${_hen_libpath}")
     message(FATAL_ERROR
@@ -106,7 +116,7 @@ if(NOT TARGET HarmonEyesNative::theia)
 
     set_target_properties(HarmonEyesNative::theia PROPERTIES
         IMPORTED_LOCATION             "${_hen_libpath}"
-        INTERFACE_INCLUDE_DIRECTORIES "${_hen_incdir};${_hen_cincdir}")
+        INTERFACE_INCLUDE_DIRECTORIES "${_hen_includes}")
 
     if(_hen_implib)
         set_target_properties(HarmonEyesNative::theia PROPERTIES
@@ -149,6 +159,6 @@ unset(_hen_implib)
 unset(_hen_libdir)
 unset(_hen_libpath)
 unset(_hen_implibpath)
-unset(_hen_incdir)
+unset(_hen_includes)
 unset(_hen_cincdir)
 unset(_hen_osx_arch_count)
