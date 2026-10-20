@@ -1,0 +1,47 @@
+# Build output
+build/
+build-*/
+cmake-build-*/
+out/
+_deps/
+Testing/
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+
+# Compiled objects and libraries
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.exp
+
+# The vendored SDK binaries ARE the product, so keep them.
+# This negation must come after the patterns above.
+!vendor/**
+
+# Editors and IDEs
+.vscode/
+.idea/
+.cache/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local environment
+.env
+.env.*
+*.log
