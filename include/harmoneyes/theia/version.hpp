@@ -18,7 +18,11 @@ inline constexpr std::string_view kVersion = "0.1.0";
 ///
 /// The C ABI hands back a pointer into a thread-local buffer that the next call
 /// to this same function overwrites, so the string is copied rather than referenced.
-/// Returns an empty string if the underlying call fails.
+///
+/// Deliberately does not throw, unlike the rest of this SDK. The underlying
+/// call returns a compile-time constant and records nothing in the error
+/// channel when it fails, so there would be nothing to report. Everything that
+/// can genuinely fail throws; see errors.hpp.
 [[nodiscard]] inline std::string version()
 {
     const char* v = ::theia_sdk_version();
@@ -28,7 +32,7 @@ inline constexpr std::string_view kVersion = "0.1.0";
 /// Version of the feature-extraction pipeline.
 ///
 /// Tracks the feature set rather than the library, so it changes when feature
-/// definitions change. Same borrowing rules as version().
+/// definitions change. Same borrowing and non-throwing rules as version().
 [[nodiscard]] inline std::string feature_version()
 {
     const char* v = ::theia_sdk_feature_version();
