@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  # Builds the examples the way a customer would (through find_package), then
+  # checks the vendored release is fit to ship. Extend to more runners as each
+  # platform's library is added.
+  linux-x86_64:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Build the examples
+        run: |
+          cmake -S . -B build -DCMAKE_CXX_FLAGS="-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror"
+          cmake --build build --parallel
+
+      - name: The SDK refuses to start without a device lease
+        run: |
+          g++ -std=c++17 -Iinclude -Ivendor/include .github/ci/requires_lease.cpp \
+              vendor/linux-x86_64/libtheia.so.0 -Wl,-rpath,"$PWD/vendor/linux-x86_64" -o requires_lease
+          env -u THEIA_LEASE -u THEIA_LICENSE_KEY ./requires_lease
+
+      - name: The vendored files are a release build
+        run: |
+          set -euo pipefail
+          version="$(cat vendor/VERSION)"
+          if [[ "${version}" == *local* ]]; then
+            echo "::error file=vendor/VERSION::${version} is a local build"
+            exit 1
+          fi
+          for lib in vendor/*/libtheia.so.0 vendor/*/libtheia.dylib vendor/*/theia.dll; do
+            [ -e "${lib}" ] || continue
+            if grep -aq -- "-----BEGIN PRIVATE KEY-----" "${lib}"; then
+              echo "::error file=${lib}::contains a private key"
+              exit 1
+            fi
+          done
+          for lib in vendor/linux-*/libtheia.so.0; do
+            [ -e "${lib}" ] || continue
+            if ! file "${lib}" | grep -q ", stripped"; then
+              echo "::error file=${lib}::is not stripped"
+              exit 1
+            fi
+          done
+
+      - name: The webcam engine is complete
+        run: |
+          set -euo pipefail
+          test -s vendor/webcam-sidecar/sidecar.mjs
+          test -s vendor/webcam-sidecar/tobii/nexus_wasm.wasm
+          if [ ! -s vendor/webcam-sidecar/license-url ]; then
+            echo "::error file=vendor/webcam-sidecar::license-url is missing, so the webcam cannot fetch its licence"
+            exit 1
+          fi
