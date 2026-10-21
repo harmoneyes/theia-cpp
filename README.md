@@ -150,7 +150,9 @@ sdk.start_realtime_data();   // opens the camera and starts the gaze engine
 ```
 
 **Requirements:** **Node.js 20+** on your `PATH`. The gaze engine's licence is
-fetched automatically.
+fetched automatically from the endpoint shipped with the SDK, which needs a
+key: set `TOBII_LICENSE_API_KEY` (or `Config::license_api_key`). Without it the
+endpoint answers 401 and the webcam will not start.
 
 `NexusWebcamTracker::Config` selects a camera (`device_id`) and describes your
 screen (`screen_width_mm`, `screen_height_mm`); set those to your display for
@@ -204,6 +206,12 @@ origin with `set_graph_start_time()`, then use `process_baselining_data()`,
 `GroundTruthPoint` values. Keep the result with `save_refined_model()` and
 `load_refined_model()`, or go back with `reset_to_base_model()`.
 
+Alert rules are a JSON document, not a bare array; anything else is rejected:
+
+```json
+{ "format": "theia-alert-rules", "version": 1, "etag": "\"v1\"", "rules": [] }
+```
+
 Alert rules are configured with `set_alert_rules()`, delivered to
 `set_alert_callback()`, and can be kept in sync with your HarmonEyes dashboard
 with `enable_alert_sync()`.
@@ -218,6 +226,8 @@ All optional; each has an equivalent in code.
 | `THEIA_MODEL_CACHE_DIR` | where downloaded models are cached | `Options::model_cache_dir` |
 | `THEIA_NODE` | the Node executable, for the webcam | `NexusWebcamTracker::Config::node_path` |
 | `THEIA_WEBCAM_SIDECAR_DIR` | the webcam engine's directory | `NexusWebcamTracker::Config::sidecar_dir` |
+| `TOBII_LICENSE_URL` | where the webcam fetches its gaze-engine licence | `NexusWebcamTracker::Config::license_url` |
+| `TOBII_LICENSE_API_KEY` | key for that endpoint, sent as `X-License-Key` | `NexusWebcamTracker::Config::license_api_key` |
 
 ## License & Usage
 

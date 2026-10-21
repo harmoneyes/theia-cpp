@@ -896,6 +896,12 @@ struct NexusWebcamTracker::Impl {
         return "node";
     }
 
+    [[nodiscard]] std::string license_api_key() const
+    {
+        if (!config_.license_api_key.empty()) { return config_.license_api_key; }
+        return env("TOBII_LICENSE_API_KEY");
+    }
+
     [[nodiscard]] std::vector<std::string> resolve_command() const
     {
         const std::filesystem::path entry = sidecar_dir() / "sidecar.mjs";
@@ -946,12 +952,18 @@ struct NexusWebcamTracker::Impl {
     /// this SDK does not have to link an HTTP client.
     [[nodiscard]] std::string fetch_license(const std::string& url) const
     {
+        // The key arrives on stdin rather than argv, so it never appears in
+        // the process list. X-Device-Time lets the endpoint reject a device
+        // whose clock has drifted, which it would otherwise sign for.
         static const char* const kFetch =
             "const [u,t]=process.argv.slice(1);"
-            "fetch(u,{signal:AbortSignal.timeout(+t)})"
+            "let k='';process.stdin.on('data',d=>{k+=d}).on('end',()=>{"
+            "const h={'X-Device-Time':new Date().toISOString()};"
+            "k=k.trim();if(k)h['X-License-Key']=k;"
+            "fetch(u,{headers:h,signal:AbortSignal.timeout(+t)})"
             ".then(async r=>{if(!r.ok){process.stderr.write('HTTP '+r.status);process.exit(2)}"
             "process.stdout.write(Buffer.from(await r.arrayBuffer()))})"
-            ".catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1)})";
+            ".catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1)})})";
 
         detail::Process fetcher;
         try {
@@ -961,6 +973,7 @@ struct NexusWebcamTracker::Impl {
                 "NexusWebcamTracker: Node.js 20+ is required for the webcam. Install it from "
                 "nodejs.org, or set THEIA_NODE to its path.");
         }
+        fetcher.write_line(license_api_key());
         fetcher.close_stdin();
 
         std::vector<unsigned char> body;
@@ -978,8 +991,15 @@ struct NexusWebcamTracker::Impl {
 
         const std::string license = detail::sidecar::decode_utf16le(body);
         if (license.empty()) {
+            // 401 is almost always a missing or stale key rather than a bad
+            // URL, so say so instead of leaving "HTTP 401" to be decoded.
+            const std::string hint =
+                error.find("HTTP 401") != std::string::npos
+                    ? ". The licence endpoint rejected the key: set "
+                      "Config::license_api_key or TOBII_LICENSE_API_KEY."
+                    : std::string{};
             throw std::runtime_error("NexusWebcamTracker: could not fetch the Tobii licence from " +
-                                     url + (error.empty() ? std::string{} : ": " + error));
+                                     url + (error.empty() ? std::string{} : ": " + error) + hint);
         }
         return license;
     }

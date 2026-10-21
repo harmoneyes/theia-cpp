@@ -48,6 +48,11 @@ public:
         /// $TOBII_LICENSE_URL, then the address shipped with the SDK.
         std::string license_url;
 
+        /// Key for the licence endpoint, sent as `X-License-Key`. Empty uses
+        /// $TOBII_LICENSE_API_KEY. The endpoint shipped with this SDK requires
+        /// one and answers 401 without it.
+        std::string license_api_key;
+
         /// The webcam-sidecar directory. Empty uses $THEIA_WEBCAM_SIDECAR_DIR,
         /// then the copy in this repository.
         std::filesystem::path sidecar_dir;
