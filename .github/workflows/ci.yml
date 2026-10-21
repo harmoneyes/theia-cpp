@@ -49,13 +49,3 @@ jobs:
               exit 1
             fi
           done
-
-      - name: The webcam engine is complete
-        run: |
-          set -euo pipefail
-          test -s vendor/webcam-sidecar/sidecar.mjs
-          test -s vendor/webcam-sidecar/tobii/nexus_wasm.wasm
-          if [ ! -s vendor/webcam-sidecar/license-url ]; then
-            echo "::error file=vendor/webcam-sidecar::license-url is missing, so the webcam cannot fetch its licence"
-            exit 1
-          fi

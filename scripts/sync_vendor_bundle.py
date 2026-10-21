@@ -57,20 +57,12 @@ PLATFORM_LIBRARIES = {
 # IMPORTED_IMPLIB has nothing to point at if CI forgets to publish it.
 WINDOWS_IMPORT_LIBRARY = "theia.lib"
 
-# Structs the C++ layer aliases or copies field by field. A silent reorder here
-# is the worst thing that can reach a customer: it compiles, links and reads
-# the wrong bytes. sdk_impl.hpp static_asserts the sizes, but only against the
-# header it was given, so the header itself has to be checked.
-ABI_CRITICAL_STRUCTS = (
-    "gaze_sample_t",
-    "options_t",
-    "config_t",
-    "cog_load_result_t",
-    "fatigue_result_t",
-    "attention_result_t",
-    "mental_readiness_result_t",
-    "alert_event_t",
-)
+# Types whose width differs across linux-x86_64, linux-aarch64, macos-arm64
+# and windows-x86_64. Everything else in this header is fixed-width, a
+# pointer, or a typedef that resolves to one of those. The layout probe
+# compiles for this machine only, so a field of one of these types would make
+# its measurements wrong for the other three.
+PLATFORM_VARIABLE_TYPES = re.compile(r"\b(?:long|bool|_Bool|wchar_t|enum)\b")
 
 
 class BundleError(RuntimeError):
@@ -104,8 +96,11 @@ def materialise(bundle: str, workdir: Path, sha256: str | None) -> Path:
             raise BundleError("--sha256 is required when fetching over the network")
         log(f"downloading {bundle}")
         archive = workdir / "bundle.tar.gz"
-        with urllib.request.urlopen(bundle) as response, archive.open("wb") as out:
-            shutil.copyfileobj(response, out)
+        try:
+            with urllib.request.urlopen(bundle) as response, archive.open("wb") as out:
+                shutil.copyfileobj(response, out)
+        except OSError as error:
+            raise BundleError(f"could not download {bundle}: {error}") from error
         verify_digest(archive, sha256)
         return unpack(archive, workdir)
 
@@ -125,7 +120,11 @@ def unpack(archive: Path, workdir: Path) -> Path:
     """Unpack a tarball, refusing members that escape the destination."""
     target = workdir / "unpacked"
     target.mkdir()
-    with tarfile.open(archive) as tar:
+    try:
+        tar_file = tarfile.open(archive)
+    except tarfile.TarError as error:
+        raise BundleError(f"{archive.name} is not a readable tarball: {error}") from error
+    with tar_file as tar:
         for member in tar.getmembers():
             destination = (target / member.name).resolve()
             # String prefixes let a sibling such as `unpacked2/` pass as being
@@ -153,10 +152,30 @@ def struct_bodies(header: Path) -> dict[str, list[str]]:
     source = re.sub(r"//[^\n]*", "", source)
 
     bodies: dict[str, list[str]] = {}
-    for match in re.finditer(r"typedef\s+struct\s*\{(.*?)\}\s*(\w+)\s*;", source, re.S):
+    # `typedef struct tag { ... } name;` as well as the anonymous form.
+    for match in re.finditer(
+            r"typedef\s+struct\s+(?:\w+\s*)?\{(.*?)\}\s*(\w+)\s*;", source, re.S):
         body, name = match.group(1), match.group(2)
-        bodies[name] = [" ".join(f.split()) for f in body.split(";") if f.strip()]
+        fields = []
+        for raw in body.split(";"):
+            raw = " ".join(raw.split())
+            if not raw:
+                continue
+            # `const char *x` and `const char* x` are the same field; only an
+            # upstream reformat tells them apart, so normalise before compare.
+            raw = re.sub(r"\s*(\*+)\s*", r"\1 ", raw).strip()
+            fields.extend(split_declarators(raw))
+        bodies[name] = fields
     return bodies
+
+
+def split_declarators(declaration: str) -> list[str]:
+    """`int a, b` is two fields; treating it as one loses a field entirely."""
+    if "," not in declaration or "(" in declaration:
+        return [declaration]
+    head, *rest = declaration.split(",")
+    type_text = re.sub(r"\s*\w+\s*(?:\[[^\]]*\])*\s*$", "", head).strip()
+    return [head.strip()] + [f"{type_text} {name.strip()}" for name in rest]
 
 
 def field_name(declaration: str) -> str:
@@ -180,7 +199,7 @@ def measure_layout(include_root: Path, bodies: dict[str, list[str]],
     """
     lines = ['#include <stddef.h>', '#include <stdio.h>',
              '#include <harmoneyes/theia_export.h>', 'int main(void) {']
-    wanted = [n for n in ABI_CRITICAL_STRUCTS if n in bodies]
+    wanted = list(bodies)
     for name in wanted:
         lines.append(f'    printf("S {name} %zu\\n", sizeof({name}));')
         for declaration in bodies[name]:
@@ -217,17 +236,63 @@ def measure_layout(include_root: Path, bodies: dict[str, list[str]],
     return {n: (sizes[n], tuple(offsets.get(n, ()))) for n in wanted}
 
 
-def check_abi(bundle: Path, workdir: Path) -> list[str]:
+def resolve_typedef(name: str, source: str) -> str:
+    """What a typedef resolves to, one level deep, or the name unchanged."""
+    enum_or_struct = re.search(
+        r"typedef\s+(enum|struct|union)\b[^;{]*\{[^}]*\}\s*%s\s*;" % re.escape(name),
+        source, re.S)
+    if enum_or_struct:
+        return enum_or_struct.group(1)
+    plain = re.search(r"typedef\s+([\w\s]+?)\s+%s\s*;" % re.escape(name), source)
+    return plain.group(1).strip() if plain else name
+
+
+def check_portable_types(header: Path) -> list[str]:
+    """Fields whose width is not the same on every platform we ship.
+
+    The layout probe compiles for this machine only, while a bundle carries
+    four platforms. That holds as long as every field is fixed-width or a
+    pointer, so enforce it rather than remember it.
+    """
+    source = header.read_text(encoding="utf-8", errors="replace")
+    problems = []
+    for name, body in struct_bodies(header).items():
+        for declaration in body:
+            if re.search(r"\(\s*\*\s*\w+\s*\)\s*\(", declaration):
+                continue                      # function pointer, always a word
+            if "*" in declaration:
+                continue                      # any pointer, always a word
+            type_text = re.sub(r"\s*\w+\s*(?:\[[^\]]*\])*\s*$", "",
+                               declaration).strip()
+            resolved = resolve_typedef(type_text, source)
+            if PLATFORM_VARIABLE_TYPES.search(resolved):
+                detail = (f"{type_text!r}" if resolved == type_text
+                          else f"{type_text!r} (a {resolved})")
+                problems.append(
+                    f"{name}.{field_name(declaration)} is {detail}, whose width "
+                    "varies by platform; the layout check compiles for one "
+                    "platform only")
+    return problems
+
+
+def check_abi(bundle: Path, workdir: Path, exact: bool = False) -> list[str]:
     """Layout drift in the structs the C++ layer aliases or copies field by field.
 
     A bundle ships its header and its library together and the C++ is
     recompiled against both, so a field appended to the end of a struct is
     safe and must not block a release. What is never safe is an existing
     field moving, changing width, or disappearing.
+
+    With `exact`, growth is forbidden too. That is the post-extension check:
+    once the redaction has been mirrored the two must describe the same
+    bytes, so a redaction that came out too narrow is caught here rather
+    than shipped.
     """
     current_root = VENDOR_DIR / "include"
     if not (current_root / "harmoneyes" / "theia_export.h").exists():
-        return []
+        raise BundleError(
+            "vendor/include/harmoneyes/theia_export.h is missing, so there is "
+            "nothing to check the bundle's layout against")
 
     new_root = bundle / "include"
     new_header = new_root / "harmoneyes" / "theia_export.h"
@@ -254,13 +319,17 @@ def check_abi(bundle: Path, workdir: Path) -> list[str]:
             problems.append(f"{name} is gone from the new header")
             continue
         new_size, new_offsets = new[name]
-        if len(new_offsets) < len(current_offsets):
+        if len(new_offsets) < len(current_offsets) or (
+                exact and len(new_offsets) != len(current_offsets)):
             problems.append(
                 f"{name}: {len(current_offsets)} fields -> {len(new_offsets)}; "
                 "a field was removed, which needs a major version bump")
             continue
-        if new_size < current_size:
-            problems.append(f"{name}: {current_size} bytes -> {new_size}")
+        if new_size < current_size or (exact and new_size != current_size):
+            problems.append(
+                f"{name}: {current_size} bytes -> {new_size}"
+                + ("; the redacted header does not describe the same bytes"
+                   if exact else ""))
             continue
         for index, (was, now) in enumerate(zip(current_offsets, new_offsets)):
             if was != now:
@@ -288,6 +357,7 @@ def validate(bundle: Path, workdir: Path) -> list[str]:
     if not header.exists():
         problems.append("include/harmoneyes/theia_export.h is missing")
     else:
+        problems.extend(check_portable_types(header))
         problems.extend(check_abi(bundle, workdir))
 
     platforms = [d for d in bundle.iterdir() if d.is_dir() and d.name in PLATFORM_LIBRARIES]
@@ -322,24 +392,41 @@ def validate(bundle: Path, workdir: Path) -> list[str]:
 # ── Replacing ─────────────────────────────────────────────────────────────
 
 
-def redact(declaration: str, index: int) -> str:
+def redact(declaration: str, index: int, source_header: str) -> str:
     """Rewrite one field declaration to hide its name, keeping its width.
 
-    Pointers all measure the same, so an unresolvable typedef is safe as
-    `const void*`. Primitives keep their own type, which is always spelled in
-    terms of stdint.h. measure_layout re-checks the result either way.
+    A typedef has to be resolved against the header it came from, because its
+    spelling says nothing about its width and our redacted header will not
+    define it. theia_cog_load_transition_ace_callback_t, for instance, is a
+    function pointer written as a plain type name.
     """
     if re.search(r"\(\s*\*\s*\w+\s*\)\s*\(", declaration):
         return f"void (*reserved_{index})(void)"
-    if declaration.rstrip().endswith("*") or "*" in declaration:
-        return f"const void* reserved_{index}"
+
+    # An array field is as wide as its extent; dropping it silently narrows
+    # the struct, which is the very bug this header has to avoid.
+    extent = "".join(re.findall(r"\[[^\]]*\]", declaration))
+    if "*" in declaration:
+        return f"const void* reserved_{index}{extent}"
+
     type_text = re.sub(r"\s*\w+\s*(?:\[[^\]]*\])*\s*$", "", declaration).strip()
-    if type_text in {"char", "short", "int", "long", "float", "double", "size_t",
+    if type_text in {"char", "short", "int", "float", "double", "size_t",
                      "int8_t", "int16_t", "int32_t", "int64_t",
                      "uint8_t", "uint16_t", "uint32_t", "uint64_t"}:
-        return f"{type_text} reserved_{index}"
-    # An unknown typedef by value: keep it and let the layout probe judge.
-    return f"{type_text} reserved_{index}"
+        return f"{type_text} reserved_{index}{extent}"
+
+    # A typedef. Only a function-pointer one can be redacted blind, since
+    # every function pointer is a word wide.
+    if re.search(r"typedef\s+[\w\s*]+\(\s*\*\s*%s\s*\)\s*\("
+                 % re.escape(type_text), source_header):
+        return f"void (*reserved_{index})(void)"
+
+    # A struct or enum by value: redacting it would need its definition
+    # vendored too, which is a judgement call about what to disclose.
+    raise BundleError(
+        f"the engine added a {type_text!r} field that cannot be redacted "
+        "automatically; vendor that type into "
+        "vendor/include/harmoneyes/theia_export.h by hand, then re-run")
 
 
 def extend_redaction(bundle: Path) -> list[str]:
@@ -352,13 +439,19 @@ def extend_redaction(bundle: Path) -> list[str]:
     disclosing anything.
     """
     current_header = VENDOR_DIR / "include" / "harmoneyes" / "theia_export.h"
-    new_bodies = struct_bodies(bundle / "include" / "harmoneyes" / "theia_export.h")
+    if not current_header.exists():
+        raise BundleError(
+            "vendor/include/harmoneyes/theia_export.h is missing; restore it "
+            "before vendoring a bundle")
+    bundle_header = bundle / "include" / "harmoneyes" / "theia_export.h"
+    bundle_text = bundle_header.read_text(encoding="utf-8", errors="replace")
+    new_bodies = struct_bodies(bundle_header)
     current_bodies = struct_bodies(current_header)
 
     source = current_header.read_text(encoding="utf-8")
     added = []
-    for name in ABI_CRITICAL_STRUCTS:
-        if name not in new_bodies or name not in current_bodies:
+    for name in current_bodies:
+        if name not in new_bodies:
             continue
         extra = new_bodies[name][len(current_bodies[name]):]
         if not extra:
@@ -366,9 +459,11 @@ def extend_redaction(bundle: Path) -> list[str]:
         taken = [int(n) for n in re.findall(r"reserved_(\d+)", " ".join(current_bodies[name]))]
         start = max(taken) + 1 if taken else 0
         fields = "".join(
-            f"    {redact(declaration, start + offset)};\n"
+            f"    {redact(declaration, start + offset, bundle_text)};\n"
             for offset, declaration in enumerate(extra))
-        closing = re.search(r"\n\}\s*%s;" % re.escape(name), source)
+        closing = re.search(r"\n\}\s*%s\s*;" % re.escape(name), source)
+        if not closing:
+            raise BundleError(f"could not find the end of {name} in the vendored header")
         source = source[:closing.start() + 1] + fields + source[closing.start() + 1:]
         added.append(f"{name} +{len(extra)}")
 
@@ -381,6 +476,27 @@ def extend_redaction(bundle: Path) -> list[str]:
 def sync(bundle: Path, workdir: Path) -> None:
     VENDOR_DIR.mkdir(parents=True, exist_ok=True)
 
+    # vendor/include/ is this repo's own redacted header, not the bundle's.
+    # Mirror any growth into it and prove the result describes the same bytes
+    # FIRST: everything here can fail, and a half-applied sync that leaves a
+    # new library beside an old header is the mismatch this gate exists to
+    # prevent. Only once it holds do the binaries move.
+    header = VENDOR_DIR / "include" / "harmoneyes" / "theia_export.h"
+    before = header.read_text(encoding="utf-8") if header.exists() else None
+    try:
+        if extend_redaction(bundle):
+            remaining = check_abi(bundle, workdir / "recheck", exact=True)
+            if remaining:
+                raise BundleError(
+                    "the redacted header does not match the bundle after "
+                    "extending it: " + "; ".join(remaining))
+            log("redacted header re-checked against the bundle")
+    except BaseException:
+        if before is not None:
+            header.write_text(before)
+        log("nothing was changed")
+        raise
+
     for name in PLATFORM_LIBRARIES:
         source = bundle / name
         if not source.is_dir():
@@ -390,16 +506,6 @@ def sync(bundle: Path, workdir: Path) -> None:
             shutil.rmtree(destination)
         shutil.copytree(source, destination)
         log(f"vendored {name}/")
-
-    # vendor/include/ is this repo's own redacted header, not the bundle's.
-    # Mirror any growth into it, then prove the result still matches.
-    if extend_redaction(bundle):
-        remaining = check_abi(bundle, workdir / "recheck")
-        if remaining:
-            raise BundleError(
-                "the redacted header still does not match after extending it: "
-                + "; ".join(remaining))
-        log("redacted header re-checked against the bundle")
 
     version = (bundle / "VERSION").read_text().strip()
     (VENDOR_DIR / "VERSION").write_text(version + "\n")
@@ -425,18 +531,20 @@ def main() -> None:
         try:
             bundle = materialise(args.bundle, Path(tmp), args.sha256)
             problems = validate(bundle, Path(tmp) / "abi")
+
+            if problems:
+                for problem in problems:
+                    log(f"REJECTED: {problem}")
+                sys.exit(
+                    f"[sync_vendor_bundle] {len(problems)} problem(s); nothing was changed")
+
+            log("bundle looks good")
+            if args.check_only:
+                return
+            sync(bundle, Path(tmp) / "sync")
         except BundleError as error:
             sys.exit(f"[sync_vendor_bundle] {error}")
 
-        if problems:
-            for problem in problems:
-                log(f"REJECTED: {problem}")
-            sys.exit(f"[sync_vendor_bundle] {len(problems)} problem(s); nothing was changed")
-
-        log("bundle looks good")
-        if args.check_only:
-            return
-        sync(bundle, Path(tmp) / "sync")
         log("done — review `git status` and commit vendor/")
 
 

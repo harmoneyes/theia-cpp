@@ -71,7 +71,6 @@ typedef struct {
     const char* label;
     double composite_score;
     int total_observations;
-    double reserved_0;
 } attention_result_t;
 
 typedef struct {
@@ -82,7 +81,6 @@ typedef struct {
     int batch_number;
     int64_t timestamp_ns;
     const char* model_label;
-    double reserved_0;
 } cog_load_result_t;
 
 typedef struct {
@@ -100,7 +98,6 @@ typedef struct {
     int batch_number;
     int ttt_level;
     int ttt_minutes;
-    double reserved_0;
 } fatigue_result_t;
 
 typedef struct {
@@ -258,12 +255,6 @@ typedef struct {
     const char* lease_expected_device_id;
     const char* lease_expected_tenant_id;
     const void* reserved_36;
-    void (*reserved_37)(void);
-    void* reserved_38;
-    void (*reserved_39)(void);
-    void* reserved_40;
-    void (*reserved_41)(void);
-    void* reserved_42;
 } options_t;
 
 theia_error_code_t theia_get_last_error_code(void);

@@ -78,10 +78,6 @@ set(_hen_libdir  "${HARMONEYES_NATIVE_ROOT}/vendor/${_hen_platform}")
 set(_hen_libpath "${_hen_libdir}/${_hen_libname}")
 set(_hen_includes "${HARMONEYES_NATIVE_ROOT}/include" "${HARMONEYES_NATIVE_ROOT}/vendor/include")
 
-# The webcam gaze engine, shared by every platform. Exposed so applications
-# can install it alongside themselves; see README.md.
-set(HarmonEyesNative_WEBCAM_SIDECAR_DIR "${HARMONEYES_NATIVE_ROOT}/vendor/webcam-sidecar")
-
 # The binaries are stored with Git LFS. A clone without it leaves a ~130-byte
 # text pointer in place of each one, so EXISTS alone cannot tell "absent"
 # from "not fetched".
@@ -103,11 +99,6 @@ endfunction()
 
 _hen_require_binary("${_hen_libpath}" "library")
 
-if(IS_DIRECTORY "${HarmonEyesNative_WEBCAM_SIDECAR_DIR}")
-    _hen_require_binary("${HarmonEyesNative_WEBCAM_SIDECAR_DIR}/tobii/nexus_wasm.wasm"
-                        "webcam engine")
-endif()
-
 # Windows cannot link a bare DLL; CMake requires the import library.
 if(_hen_implib)
     set(_hen_implibpath "${_hen_libdir}/${_hen_implib}")
@@ -123,14 +114,6 @@ if(NOT TARGET HarmonEyesNative::theia)
         IMPORTED_LOCATION             "${_hen_libpath}"
         INTERFACE_INCLUDE_DIRECTORIES "${_hen_includes}"
         INTERFACE_COMPILE_FEATURES    cxx_std_17)
-
-    # Lets NexusWebcamTracker find the bundled sidecar with no configuration
-    # when run from a build tree.
-    if(IS_DIRECTORY "${HarmonEyesNative_WEBCAM_SIDECAR_DIR}")
-        set_property(TARGET HarmonEyesNative::theia APPEND PROPERTY
-            INTERFACE_COMPILE_DEFINITIONS
-            "HARMONEYES_THEIA_WEBCAM_SIDECAR_DIR=\"${HarmonEyesNative_WEBCAM_SIDECAR_DIR}\"")
-    endif()
 
     if(_hen_implib)
         set_target_properties(HarmonEyesNative::theia PROPERTIES
@@ -151,9 +134,8 @@ endif()
 # so the build tree runs with no further setup.
 #
 # This covers the BUILD tree only. To ship the library with an installed
-# binary (and the webcam sidecar, if you use the webcam):
+# binary:
 #   install(FILES $<TARGET_FILE:HarmonEyesNative::theia> DESTINATION bin)
-#   install(DIRECTORY "${HarmonEyesNative_WEBCAM_SIDECAR_DIR}/" DESTINATION bin/webcam-sidecar)
 function(harmoneyes_native_copy_runtime target)
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different

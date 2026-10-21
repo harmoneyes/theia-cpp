@@ -2,8 +2,7 @@
 
 /// The HarmonEyes Theia SDK for C++.
 ///
-/// This one header is the whole API. For the webcam, also include
-/// <harmoneyes/theia_webcam.hpp>.
+/// This one header is the whole API.
 ///
 ///     #include <harmoneyes/theia.hpp>
 ///     namespace het = harmoneyes::theia;
@@ -230,7 +229,7 @@ using AlertCallback = std::function<void(const AlertEvent&)>;
 enum class Device {
     PupilLabsNeon,  ///< Pupil Labs Neon, discovered on the network automatically
     Ganzin,         ///< Ganzin Sol; call set_ganzin_connection() first
-    Webcam,         ///< A webcam (NexusWebcamTracker), or your own EyeTracker
+    Webcam,         ///< A screen-based tracker you supply; see EyeTracker
 };
 
 /// Marks a measurement as absent. A real number, not a NaN, so it compares
@@ -302,7 +301,7 @@ struct GazeSample {
     float quat_z  = -8888.0F;
 
     // Gaze normalised to [0, 1] from the top-left of the screen. Needed for
-    // screen-based (webcam-style) trackers.
+    // screen-based trackers.
     float gaze_x_norm = -8888.0F;
     float gaze_y_norm = -8888.0F;
 
@@ -318,7 +317,7 @@ struct GazeSample {
 };
 
 /// A gaze source the SDK reads from, rather than a device it connects to
-/// itself: the webcam (NexusWebcamTracker), or your own tracker.
+/// itself. Implement this to feed the SDK from a tracker of your own.
 ///
 /// Give it to TheiaSDK::set_tracker(). start_realtime_data() then calls
 /// start() and polls get_buffered_data() on a background thread, and
@@ -341,6 +340,9 @@ public:
     [[nodiscard]] virtual std::vector<GazeSample> get_buffered_data() = 0;
 
     /// Whether the device is currently usable.
+    /// Whether the tracker still has its device. Called from the same single
+    /// background thread as get_buffered_data(), never concurrently with it,
+    /// so the two may share state without locking.
     [[nodiscard]] virtual bool is_connected() const = 0;
 
     /// Stop producing samples and release the device.
@@ -408,9 +410,21 @@ public:
 
     // ── Device connection ──
 
-    /// Use this gaze source. Required for Device::Webcam. It must outlive the
-    /// SDK, and cannot be changed while running.
+    /// Use this gaze source. Required for Device::Webcam. It cannot be
+    /// changed while running.
+    ///
+    /// The tracker must outlive the SDK, or be dropped with clear_tracker()
+    /// first. Declaring it *after* the SDK destroys it first and is the easy
+    /// way to get this wrong:
+    ///
+    ///     MyTracker     tracker;   // declare the tracker FIRST
+    ///     het::TheiaSDK sdk{opts};
+    ///     sdk.set_tracker(tracker);
     void set_tracker(EyeTracker& tracker);
+
+    /// Stop using the tracker given to set_tracker(). Call this before
+    /// destroying it if it does not outlive the SDK. Throws while running.
+    void clear_tracker();
 
     /// Where the Ganzin Sol is. Call before start_realtime_data().
     void set_ganzin_connection(const std::string& ip, int port = 8080, int rtsp_port = 8086);

@@ -4,7 +4,6 @@ set(HARMONEYES_EXAMPLES
     quickstart
     theia-pupil-labs-streaming
     theia-ganzin-streaming
-    theia-webcam-streaming
 )
 
 foreach(example IN LISTS HARMONEYES_EXAMPLES)

@@ -195,6 +195,15 @@ inline void check(int rc, const char* context)
     throw_opaque_error(context);
 }
 
+/// Operations that report success as a predicate rather than as a command:
+/// the C entry point returns `self->thing() ? 1 : 0`, so 0 means the library
+/// declined and -1 means it threw. Both are failures. Passing these to
+/// check() inverts them: success throws and failure passes silently.
+inline void check_succeeded(int rc, const char* context)
+{
+    if (rc != 1) { throw_opaque_error(context); }
+}
+
 // ── Conversions ──
 
 /// The platform name the library expects for a device.
@@ -374,6 +383,12 @@ struct TheiaSDK::State {
     std::atomic<bool> feeding{false};
     std::atomic<bool> feed_timed_out{false};
 
+    /// The tracker's own is_connected(), sampled by the feed thread. Read
+    /// through this rather than calling the tracker directly: EyeTracker is
+    /// documented as being used from one background thread, so asking it
+    /// from the caller's thread would race with get_buffered_data().
+    std::atomic<bool> tracker_connected{false};
+
     static constexpr std::chrono::milliseconds kFeedInterval{10};
     static constexpr std::chrono::seconds      kFeedTimeout{5};
 
@@ -409,6 +424,7 @@ struct TheiaSDK::State {
         auto last_data = clock::now();
         while (feeding.load()) {
             try {
+                tracker_connected = tracker->is_connected();
                 const std::vector<GazeSample> batch = tracker->get_buffered_data();
                 if (!batch.empty()) {
                     // The library copies each sample and never writes through
@@ -580,7 +596,7 @@ inline void TheiaSDK::start_realtime_data()
         if (s.options.device == Device::Webcam) {
             throw std::logic_error(
                 "start_realtime_data: Device::Webcam needs a gaze source; call "
-                "set_tracker() with a NexusWebcamTracker first");
+                "set_tracker() with your EyeTracker first");
         }
         detail::check(::theia_sdk_start_data_streaming(h), "start_realtime_data");
         s.native_streaming = true;
@@ -633,7 +649,18 @@ inline void TheiaSDK::set_tracker(EyeTracker& tracker)
     if (state_->running) {
         throw std::logic_error("set_tracker: cannot change the tracker while running");
     }
-    state_->tracker = &tracker;
+    state_->tracker           = &tracker;
+    state_->tracker_connected = tracker.is_connected();
+}
+
+inline void TheiaSDK::clear_tracker()
+{
+    (void)handle();
+    if (state_->running) {
+        throw std::logic_error("clear_tracker: cannot drop the tracker while running");
+    }
+    state_->tracker           = nullptr;
+    state_->tracker_connected = false;
 }
 
 inline void TheiaSDK::set_ganzin_connection(const std::string& ip, int port, int rtsp_port)
@@ -645,7 +672,7 @@ inline void TheiaSDK::set_ganzin_connection(const std::string& ip, int port, int
 inline bool TheiaSDK::is_connected() const
 {
     ::theia_sdk_t* h = handle();
-    if (state_->tracker != nullptr) { return state_->tracker->is_connected(); }
+    if (state_->tracker != nullptr) { return state_->tracker_connected.load(); }
     return detail::check_bool(::theia_sdk_is_tracker_connected(h), "is_connected");
 }
 
@@ -809,17 +836,17 @@ inline void TheiaSDK::process_refining_data(const std::vector<GroundTruthPoint>&
 
 inline void TheiaSDK::save_refined_model(const std::string& path) const
 {
-    detail::check(::theia_sdk_save_refined_model(handle(), path.c_str()), "save_refined_model");
+    detail::check_succeeded(::theia_sdk_save_refined_model(handle(), path.c_str()), "save_refined_model");
 }
 
 inline void TheiaSDK::load_refined_model(const std::string& path)
 {
-    detail::check(::theia_sdk_load_refined_model(handle(), path.c_str()), "load_refined_model");
+    detail::check_succeeded(::theia_sdk_load_refined_model(handle(), path.c_str()), "load_refined_model");
 }
 
 inline void TheiaSDK::reset_to_base_model()
 {
-    detail::check(::theia_sdk_reset_to_base_model(handle()), "reset_to_base_model");
+    detail::check_succeeded(::theia_sdk_reset_to_base_model(handle()), "reset_to_base_model");
 }
 
 inline void TheiaSDK::set_alert_rules(const std::string& rules_json)

@@ -31,16 +31,15 @@ harmoneyes_native_copy_runtime(my_app)
 - **Platforms:** Linux x86_64. Linux aarch64, macOS arm64 (Apple Silicon) and
   Windows x86_64 are coming; CMake reports clearly if your platform is not in
   this release.
-- **Node.js 20+** — required **only for the Webcam platform**, whose gaze
-  engine runs on Node. Install from [nodejs.org](https://nodejs.org) and ensure
-  `node` is on your `PATH`.
 - **Device Lease:** a valid device lease is required to use the SDK — see below.
 
 ## Device Lease
 
-This SDK runs on customer machines with no connection back to HarmonEyes, so it
-authenticates with a **device lease**: a signed, time-boxed token that's
-verified entirely offline.
+The SDK authenticates with a **device lease**: a signed, time-boxed token
+verified entirely offline, so a customer machine never calls home to log in.
+(It does still reach the model CDN; see
+[Environment variables](#environment-variables) if you need to allowlist or
+redirect that.)
 
 **Getting your first lease:** contact support@harmoneyes.com. HarmonEyes staff
 issues a lease for your device and sends you the token.
@@ -78,8 +77,7 @@ sdk.stop_processing();
 
 See [`examples/quickstart.cpp`](examples/quickstart.cpp). The whole API, with a
 line of documentation per call, is in
-[`harmoneyes/theia.hpp`](include/harmoneyes/theia.hpp); the webcam adds
-[`harmoneyes/theia_webcam.hpp`](include/harmoneyes/theia_webcam.hpp).
+[`harmoneyes/theia.hpp`](include/harmoneyes/theia.hpp).
 
 Failures are reported as exceptions: catch `std::exception` to handle them
 all, or `het::LeaseVerificationError` for lease problems. Use a `TheiaSDK` from
@@ -132,47 +130,33 @@ sdk.set_ganzin_connection("192.168.1.100", 8080);
 
 See [`examples/theia-ganzin-streaming.cpp`](examples/theia-ganzin-streaming.cpp).
 
-### Webcam
+### Your own tracker
 
-The Webcam platform turns on your webcam and estimates gaze with the bundled
-Tobii Nexus engine. Give the SDK a `NexusWebcamTracker`; starting the data
-stream opens the camera.
+`Device::Webcam` takes gaze from a tracker you supply rather than one the SDK
+connects to itself. Implement `het::EyeTracker`, returning the samples
+gathered since the last call from `get_buffered_data()`, and hand it to
+`set_tracker()` before starting the stream.
 
 ```cpp
-#include <harmoneyes/theia.hpp>
-#include <harmoneyes/theia_webcam.hpp>
-
 het::TheiaSDK sdk{het::Device::Webcam};
-het::NexusWebcamTracker webcam;
-sdk.set_tracker(webcam);
+MyTracker tracker;            // implements het::EyeTracker
+sdk.set_tracker(tracker);
 sdk.start_new_session(session_uuid);
-sdk.start_realtime_data();   // opens the camera and starts the gaze engine
+sdk.start_realtime_data();    // calls tracker.start(), then polls it
 ```
 
-**Requirements:** **Node.js 20+** on your `PATH`, and the gaze engine's licence
-endpoint. Set `TOBII_LICENSE_RENEWAL_LAMBDA_URL` and
-`TOBII_LICENSE_RENEWAL_API_KEY` (or `Config::license_url` and
-`Config::license_api_key`); contact support@harmoneyes.com for both. Without
-the key the endpoint answers 401 and the webcam will not start.
+A default-constructed `het::GazeSample` uses `NON_COMPUTE_VALUE` for the
+optional measurements (pupil, eyelid, IMU, normalised gaze, screen and head
+pose), so you can leave those alone. It does **not** mark everything absent:
+eye positions default to `0.0`, and `left_eye_validity` / `right_eye_validity`
+default to `1` (valid) with `left_eye_status` / `right_eye_status` at `2`
+(open). Set those yourself on any sample where your tracker lost the eye,
+otherwise a dropped frame is fed in as a good one.
 
-`NexusWebcamTracker::Config` selects a camera (`device_id`) and describes your
-screen (`screen_width_mm`, `screen_height_mm`); set those to your display for
-the best accuracy.
+Screen-based trackers must set `gaze_x_norm` and `gaze_y_norm`: the angular
+features are computed from those, not from pixels.
 
-**Shipping your application:** the gaze engine lives in
-`vendor/webcam-sidecar/`. Install it alongside your application and point
-`Config::sidecar_dir` at it:
-
-```cmake
-install(DIRECTORY "${HarmonEyesNative_WEBCAM_SIDECAR_DIR}/" DESTINATION bin/webcam-sidecar)
-```
-
-> You can supply your own gaze source instead: implement `het::EyeTracker`
-> (return the samples gathered since the last call from `get_buffered_data()`)
-> and pass it to `set_tracker()`. A default-constructed `het::GazeSample` marks
-> every measurement absent, so fill in only what your tracker provides.
-
-See [`examples/theia-webcam-streaming.cpp`](examples/theia-webcam-streaming.cpp).
+The tracker must outlive the SDK and cannot be swapped while running.
 
 ## Coming from the Python SDK
 
@@ -185,7 +169,7 @@ The method names are the same. The differences are the ones C++ makes natural:
 | `get_fatigue_level()` → `(dict, batch)` | `get_fatigue_level()` → `std::optional<FatigueResult>` |
 | `get_attention_style()` / `get_mental_readiness(t)` → `dict` or `None` | same names → `std::optional<…>` |
 | `sdk.ip = ...; sdk.port = ...` | `sdk.set_ganzin_connection(ip, port)` |
-| `sdk.tracker.set_tracker(NexusWebcamTracker())` | `sdk.set_tracker(webcam)` |
+| `sdk.tracker.set_tracker(...)` | `sdk.set_tracker(tracker)` |
 | `except LeaseExpiredError` | `catch (const het::LeaseExpiredError&)` |
 
 **Recorded data is Python-only for now.** `predict_cog_load_batch()`,
@@ -226,10 +210,9 @@ All optional; each has an equivalent in code.
 |---|---|---|
 | `THEIA_LEASE` (or `THEIA_LICENSE_KEY`) | your device lease | `Options::lease_token` |
 | `THEIA_MODEL_CACHE_DIR` | where downloaded models are cached | `Options::model_cache_dir` |
-| `THEIA_NODE` | the Node executable, for the webcam | `NexusWebcamTracker::Config::node_path` |
-| `THEIA_WEBCAM_SIDECAR_DIR` | the webcam engine's directory | `NexusWebcamTracker::Config::sidecar_dir` |
-| `TOBII_LICENSE_RENEWAL_LAMBDA_URL` | where the webcam fetches its gaze-engine licence (`TOBII_LICENSE_URL` is the older name) | `NexusWebcamTracker::Config::license_url` |
-| `TOBII_LICENSE_RENEWAL_API_KEY` | key for that endpoint, sent as `X-License-Key` (`TOBII_LICENSE_API_KEY` is the older name) | `NexusWebcamTracker::Config::license_api_key` |
+| `THEIA_MODEL_CDN_URL` | where models are downloaded from | — |
+| `THEIA_DEVICE_API_URL` | the HarmonEyes API used by `enable_alert_sync()` | — |
+| `THEIA_ALERT_CACHE_DIR` | where synced alert rules are cached | — |
 
 ## License & Usage
 
