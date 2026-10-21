@@ -138,8 +138,8 @@ gathered since the last call from `get_buffered_data()`, and hand it to
 `set_tracker()` before starting the stream.
 
 ```cpp
+MyTracker     tracker;        // implements het::EyeTracker; declare it FIRST
 het::TheiaSDK sdk{het::Device::Webcam};
-MyTracker tracker;            // implements het::EyeTracker
 sdk.set_tracker(tracker);
 sdk.start_new_session(session_uuid);
 sdk.start_realtime_data();    // calls tracker.start(), then polls it
@@ -156,7 +156,14 @@ otherwise a dropped frame is fed in as a good one.
 Screen-based trackers must set `gaze_x_norm` and `gaze_y_norm`: the angular
 features are computed from those, not from pixels.
 
-The tracker must outlive the SDK and cannot be swapped while running.
+The SDK calls `start()`, `get_buffered_data()` and `is_connected()` from one
+background thread, never concurrently, so your tracker can share state between
+them without locking.
+
+**Lifetime:** the tracker must outlive the SDK, and cannot be swapped while
+running. Declaring it *after* the SDK destroys it first, which is the easy way
+to get this wrong, so declare it first as above. If it cannot outlive the SDK,
+call `clear_tracker()` before destroying it.
 
 ## Coming from the Python SDK
 
