@@ -18,7 +18,6 @@
 #include <cstdlib>
 #include <deque>
 #include <filesystem>
-#include <fstream>
 #include <locale>
 #include <mutex>
 #include <optional>
@@ -896,9 +895,13 @@ struct NexusWebcamTracker::Impl {
         return "node";
     }
 
+    /// The engine resolves these same names in this order
+    /// (theia-native core/include/theia/tobii_license.h), so a machine set up
+    /// for the Python SDK or demo-dashboard needs no extra configuration.
     [[nodiscard]] std::string license_api_key() const
     {
         if (!config_.license_api_key.empty()) { return config_.license_api_key; }
+        if (std::string k = env("TOBII_LICENSE_RENEWAL_API_KEY"); !k.empty()) { return k; }
         return env("TOBII_LICENSE_API_KEY");
     }
 
@@ -934,16 +937,13 @@ struct NexusWebcamTracker::Impl {
         if (!resolved_license_.empty()) { return resolved_license_; }   // fetched earlier
 
         std::string url = config_.license_url;
+        if (url.empty()) { url = env("TOBII_LICENSE_RENEWAL_LAMBDA_URL"); }
         if (url.empty()) { url = env("TOBII_LICENSE_URL"); }
         if (url.empty()) {
-            std::ifstream in{sidecar_dir() / "license-url"};
-            std::getline(in, url);
-            while (!url.empty() && (url.back() == '\r' || url.back() == ' ')) { url.pop_back(); }
-        }
-        if (url.empty()) {
             throw std::runtime_error(
-                "NexusWebcamTracker: no Tobii licence. Set Config::license_url or "
-                "TOBII_LICENSE_URL, or contact support@harmoneyes.com.");
+                "NexusWebcamTracker: no Tobii licence endpoint. Set "
+                "TOBII_LICENSE_RENEWAL_LAMBDA_URL (or Config::license_url), or "
+                "contact support@harmoneyes.com.");
         }
         return fetch_license(url);
     }
@@ -953,12 +953,15 @@ struct NexusWebcamTracker::Impl {
     [[nodiscard]] std::string fetch_license(const std::string& url) const
     {
         // The key arrives on stdin rather than argv, so it never appears in
-        // the process list. X-Device-Time lets the endpoint reject a device
-        // whose clock has drifted, which it would otherwise sign for.
+        // the process list. The clock headers let the endpoint reject a device
+        // whose clock has drifted, which it would otherwise sign for; the
+        // engine sends the same three (core/src/tobii_license.cpp).
         static const char* const kFetch =
             "const [u,t]=process.argv.slice(1);"
             "let k='';process.stdin.on('data',d=>{k+=d}).on('end',()=>{"
-            "const h={'X-Device-Time':new Date().toISOString()};"
+            "const z=Intl.DateTimeFormat().resolvedOptions().timeZone;"
+            "const h={'x-device-time':new Date().toISOString()};"
+            "if(z)h['x-device-timezone']=z;"
             "k=k.trim();if(k)h['X-License-Key']=k;"
             "fetch(u,{headers:h,signal:AbortSignal.timeout(+t)})"
             ".then(async r=>{if(!r.ok){process.stderr.write('HTTP '+r.status);process.exit(2)}"
@@ -996,7 +999,7 @@ struct NexusWebcamTracker::Impl {
             const std::string hint =
                 error.find("HTTP 401") != std::string::npos
                     ? ". The licence endpoint rejected the key: set "
-                      "Config::license_api_key or TOBII_LICENSE_API_KEY."
+                      "TOBII_LICENSE_RENEWAL_API_KEY (or Config::license_api_key)."
                     : std::string{};
             throw std::runtime_error("NexusWebcamTracker: could not fetch the Tobii licence from " +
                                      url + (error.empty() ? std::string{} : ": " + error) + hint);
