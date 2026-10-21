@@ -140,6 +140,10 @@ connects to itself. Implement `het::EyeTracker`, returning the samples
 gathered since the last call from `get_buffered_data()`, and hand it to
 `set_tracker()` before starting the stream.
 
+It runs the pipeline tuned for webcam gaze: screen-based, about 30 samples a
+second. Results from trackers that differ much from that have not been
+validated, so contact support@harmoneyes.com before relying on them.
+
 ```cpp
 MyTracker     tracker;        // implements het::EyeTracker; declare it FIRST
 het::TheiaSDK sdk{het::Device::Webcam};
@@ -159,9 +163,10 @@ otherwise a dropped frame is fed in as a good one.
 Screen-based trackers must set `gaze_x_norm` and `gaze_y_norm`: the angular
 features are computed from those, not from pixels.
 
-The SDK calls `start()`, `get_buffered_data()` and `is_connected()` from one
-background thread, never concurrently, so your tracker can share state between
-them without locking.
+`start_realtime_data()` calls `start()`, then polls `get_buffered_data()` and
+`is_connected()` on the SDK's own thread; `stop_processing()` stops polling and
+calls `close()`. The SDK never calls two of these at once, so your tracker can
+share state between them without locking.
 
 **Lifetime:** the tracker must outlive the SDK, and cannot be swapped while
 running. Declaring it *after* the SDK destroys it first, which is the easy way
@@ -182,9 +187,9 @@ The method names are the same. The differences are the ones C++ makes natural:
 | `sdk.tracker.set_tracker(...)` | `sdk.set_tracker(tracker)` |
 | `except LeaseExpiredError` | `catch (const het::LeaseExpiredError&)` |
 
-**Recorded data is Python-only for now.** `predict_cog_load_batch()`,
-`predict_fatigue_batch()` and `process_tobii_g3_data()` (Tobii Pro Glasses 3)
-are not yet available in C++. Calls the Python SDK keeps only for older code,
+**Some features are Python-only for now:** the webcam
+(`NexusWebcamTracker`), and recorded data: `predict_cog_load_batch()`,
+`predict_fatigue_batch()` and `process_tobii_g3_data()` (Tobii Pro Glasses 3). Calls the Python SDK keeps only for older code,
 such as `set_window_size()` and `set_profile()`, are left out.
 
 ## Tuning and personalisation
@@ -214,14 +219,14 @@ rejected:
 
 ## Environment variables
 
-All optional; each has an equivalent in code.
+All optional. Those marked — can only be set through the environment.
 
 | Variable | Used for | In code |
 |---|---|---|
 | `THEIA_LEASE` (or `THEIA_LICENSE_KEY`) | your device lease | `Options::lease_token` |
 | `THEIA_MODEL_CACHE_DIR` | where downloaded models are cached | `Options::model_cache_dir` |
 | `THEIA_MODEL_CDN_URL` | where models are downloaded from | — |
-| `THEIA_DEVICE_API_URL` | the HarmonEyes API used by `enable_alert_sync()` | — |
+| `THEIA_DEVICE_API_URL` | the HarmonEyes API used by `enable_alert_sync()` | its `api_base_url` |
 | `THEIA_ALERT_CACHE_DIR` | where synced alert rules are cached | — |
 
 ## License & Usage

@@ -1,11 +1,10 @@
 // CI check: the vendored library must refuse to start without a valid device
 // lease.
 //
-// Both models are disabled. A default-constructed SDK loads them first, and on
-// a runner with no model cache that fails with "Required model ... not in
-// cache" BEFORE the lease is ever checked — so the check passed or failed on
-// model availability rather than on the lease. Disabling them puts the lease
-// verification first, which is the only thing this is meant to prove.
+// Both models are disabled, so that a build which does not require a lease
+// fails here as "started anyway" rather than on downloading models to a runner
+// with no model cache. A build that does require one checks the lease before
+// any model work, so disabling them changes nothing for it.
 
 #include <harmoneyes/theia.hpp>
 

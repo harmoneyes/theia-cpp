@@ -319,9 +319,11 @@ struct GazeSample {
 /// A gaze source the SDK reads from, rather than a device it connects to
 /// itself. Implement this to feed the SDK from a tracker of your own.
 ///
-/// Give it to TheiaSDK::set_tracker(). start_realtime_data() then calls
-/// start() and polls get_buffered_data() on a background thread, and
-/// stop_processing() calls close().
+/// Give it to TheiaSDK::set_tracker(). start_realtime_data() calls start(),
+/// then polls get_buffered_data() and is_connected() on the SDK's own thread;
+/// stop_processing() stops polling and calls close(). start() and close() run
+/// on the thread that called the SDK. The SDK never calls two of these at
+/// once, so they may share state without locking.
 class EyeTracker {
 public:
     virtual ~EyeTracker() = default;
@@ -335,14 +337,11 @@ public:
     /// Begin producing samples.
     virtual void start() {}
 
-    /// Samples gathered since the last call. Returning none is normal.
-    /// Called from a single background thread; must not block for long.
+    /// Samples gathered since the last call. Returning none is normal. Must
+    /// not block for long.
     [[nodiscard]] virtual std::vector<GazeSample> get_buffered_data() = 0;
 
-    /// Whether the device is currently usable.
-    /// Whether the tracker still has its device. Called from the same single
-    /// background thread as get_buffered_data(), never concurrently with it,
-    /// so the two may share state without locking.
+    /// Whether the tracker still has its device.
     [[nodiscard]] virtual bool is_connected() const = 0;
 
     /// Stop producing samples and release the device.

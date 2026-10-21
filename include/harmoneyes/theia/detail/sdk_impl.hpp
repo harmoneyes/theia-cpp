@@ -383,10 +383,11 @@ struct TheiaSDK::State {
     std::atomic<bool> feeding{false};
     std::atomic<bool> feed_timed_out{false};
 
-    /// The tracker's own is_connected(), sampled by the feed thread. Read
-    /// through this rather than calling the tracker directly: EyeTracker is
-    /// documented as being used from one background thread, so asking it
-    /// from the caller's thread would race with get_buffered_data().
+    /// The tracker's is_connected(), as last sampled by the feed thread.
+    /// While that thread runs, TheiaSDK::is_connected() reads this rather
+    /// than calling the tracker, which would race with get_buffered_data().
+    /// When it is not running, nothing races, so the tracker is asked directly
+    /// and the answer is never stale.
     std::atomic<bool> tracker_connected{false};
 
     static constexpr std::chrono::milliseconds kFeedInterval{10};
@@ -402,8 +403,9 @@ struct TheiaSDK::State {
 
     void start_feed()
     {
-        feed_timed_out = false;
-        feeding        = true;
+        feed_timed_out    = false;
+        tracker_connected = tracker->is_connected();   // before the thread exists
+        feeding           = true;
         try {
             feed = std::thread([this] { feed_loop(); });
         } catch (...) {
@@ -649,8 +651,7 @@ inline void TheiaSDK::set_tracker(EyeTracker& tracker)
     if (state_->running) {
         throw std::logic_error("set_tracker: cannot change the tracker while running");
     }
-    state_->tracker           = &tracker;
-    state_->tracker_connected = tracker.is_connected();
+    state_->tracker = &tracker;
 }
 
 inline void TheiaSDK::clear_tracker()
@@ -659,8 +660,7 @@ inline void TheiaSDK::clear_tracker()
     if (state_->running) {
         throw std::logic_error("clear_tracker: cannot drop the tracker while running");
     }
-    state_->tracker           = nullptr;
-    state_->tracker_connected = false;
+    state_->tracker = nullptr;
 }
 
 inline void TheiaSDK::set_ganzin_connection(const std::string& ip, int port, int rtsp_port)
@@ -672,7 +672,9 @@ inline void TheiaSDK::set_ganzin_connection(const std::string& ip, int port, int
 inline bool TheiaSDK::is_connected() const
 {
     ::theia_sdk_t* h = handle();
-    if (state_->tracker != nullptr) { return state_->tracker_connected.load(); }
+    if (state_->tracker != nullptr) {
+        return state_->feeding ? state_->tracker_connected.load() : state_->tracker->is_connected();
+    }
     return detail::check_bool(::theia_sdk_is_tracker_connected(h), "is_connected");
 }
 
