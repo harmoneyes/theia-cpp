@@ -1,47 +1,41 @@
 // HarmonEyes Theia SDK Example: Pupil Labs Neon
 //
-// Streams gaze from a Pupil Labs Neon and prints cognitive load and fatigue
-// once a second.
+// Connects to a Pupil Labs Neon eye tracker, streams gaze data, and prints
+// real-time cognitive load and fatigue predictions, saving them to results/.
 //
 // Prerequisites:
-//   1. export THEIA_LEASE=...   (contact sales@harmoneyes.com if you don't have one)
-//   2. The Neon paired and reachable on the same network.
+//   1. A device lease in THEIA_LEASE (contact support@harmoneyes.com if you
+//      don't have one).
+//   2. The Pupil Labs Neon paired and reachable on the same network.
 //
 // Usage:
+//   export THEIA_LEASE=...
 //   ./theia-pupil-labs-streaming
 
-#include <harmoneyes/theia/errors.hpp>
-#include <harmoneyes/theia/sdk.hpp>
+#include <harmoneyes/theia.hpp>
 
 #include <chrono>
 #include <csignal>
-#include <cstdlib>
-#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <memory>
 #include <random>
 #include <sstream>
 #include <string>
-#include <system_error>
 #include <thread>
 
 namespace het = harmoneyes::theia;
 
-constexpr double kCollectionSeconds = 400.0;
+// Fatigue updates every ~120 s, so 400 s captures at least three updates.
+constexpr std::chrono::seconds kCollectionDuration{400};
 
 namespace {
 
-std::string lease_from_env()
-{
-    if (const char* v = std::getenv("THEIA_LEASE")) { return v; }
-    if (const char* v = std::getenv("THEIA_LICENSE_KEY")) { return v; }
-    return {};
-}
+volatile std::sig_atomic_t g_interrupted = 0;
+void on_interrupt(int) { g_interrupted = 1; }
 
-std::string session_id()
+std::string new_session_id()
 {
     std::random_device rd;
     std::ostringstream out;
@@ -50,141 +44,65 @@ std::string session_id()
     return out.str();
 }
 
-const char* cog_load_label(het::CogLoadLevel level)
-{
-    switch (level) {
-        case het::CogLoadLevel::Low:      return "Low";
-        case het::CogLoadLevel::Moderate: return "Moderate";
-        case het::CogLoadLevel::High:     return "High";
-    }
-    return "Unknown";
-}
-
-const char* fatigue_label(het::SleepinessLevel level)
-{
-    switch (level) {
-        case het::SleepinessLevel::Alert:            return "Alert";
-        case het::SleepinessLevel::SomewhatFatigued: return "Somewhat Fatigued";
-        case het::SleepinessLevel::Fatigued:         return "Fatigued";
-    }
-    return "Unknown";
-}
-
-std::string fixed2(double value)
-{
-    std::ostringstream out;
-    out << std::fixed << std::setprecision(2) << value;
-    return out.str();
-}
-
-std::ofstream open_results(const std::string& name, const std::string& header, std::string& path)
-{
-    std::error_code ec;
-    std::filesystem::create_directories("results", ec);
-
-    const std::time_t now = std::time(nullptr);
-    std::tm           tm{};
-#ifdef _WIN32
-    ::localtime_s(&tm, &now);
-#else
-    ::localtime_r(&now, &tm);
-#endif
-    std::ostringstream stamp;
-    stamp << std::put_time(&tm, "%Y%m%d_%H%M%S");
-
-    path = "results/" + name + "_" + stamp.str() + ".csv";
-    std::ofstream out{path};
-    if (out) { out << header << '\n'; }
-    return out;
-}
-
-volatile std::sig_atomic_t g_interrupted = 0;
-void on_sigint(int) { g_interrupted = 1; }
-
 }  // namespace
 
 int main()
 {
-    std::signal(SIGINT, on_sigint);
-
-    het::Options options;
-    options.lease_token   = lease_from_env();
-    options.config.device = het::DeviceType::PupilLabsNeon;
-
-    std::unique_ptr<het::TheiaSDK> sdk;
-    try {
-        sdk = std::make_unique<het::TheiaSDK>(std::move(options));
-    } catch (const het::LeaseVerificationError& e) {
-        std::cerr << "[TheiaSDK] Lease rejected: " << e.what() << "\n"
-                  << "Set THEIA_LEASE to a valid device lease "
-                     "(contact sales@harmoneyes.com if you don't have one).\n";
-        return 1;
-    } catch (const het::Error& e) {
-        std::cerr << "[TheiaSDK] Could not start: " << e.what() << '\n';
-        return 1;
-    }
-
-    std::string   results_path;
-    std::ofstream results = open_results(
-        "pupil_labs_session", "elapsed_s,cog_load,cog_load_label,fatigue,fatigue_label",
-        results_path);
-    std::size_t rows = 0;
+    std::signal(SIGINT, on_interrupt);
 
     try {
-        const std::string id = session_id();
-        std::cout << "[TheiaSDK] Starting session " << id << '\n';
-        auto session = sdk->start_session(id);
+        het::TheiaSDK sdk{het::Device::PupilLabsNeon};
+
+        const std::string session_id = new_session_id();
+        std::cout << "[TheiaSDK] Starting session " << session_id << '\n';
+        sdk.start_new_session(session_id);
 
         std::cout << "[TheiaSDK] Starting data stream\n";
-        sdk->start_data_streaming();
+        sdk.start_realtime_data();
+
+        std::filesystem::create_directories("results");
+        const std::string results_path = "results/pupil_labs_session_" + session_id.substr(0, 8) + ".csv";
+        std::ofstream     results{results_path};
+        results << "elapsed_s,cog_load,cog_load_label,fatigue,fatigue_label\n";
 
         const auto start = std::chrono::steady_clock::now();
-        while (!g_interrupted) {
+        while (!g_interrupted && std::chrono::steady_clock::now() - start < kCollectionDuration) {
             const double elapsed =
                 std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-            if (elapsed >= kCollectionSeconds) { break; }
+            results << std::fixed << std::setprecision(2) << elapsed;
 
-            std::string row = fixed2(elapsed);
-            std::string status;
-
-            if (const auto cog = sdk->cog_load()) {
-                row += "," + std::to_string(static_cast<int>(cog->level)) + "," +
-                       cog_load_label(cog->level);
-                status += "CogLoad=";
-                status += cog_load_label(cog->level);
+            // Cognitive load: updates about once a second after warmup.
+            if (auto cog = sdk.get_cog_load()) {
+                results << ',' << static_cast<int>(cog->level) << ',' << cog->label;
+                std::cout << "  Cognitive Load: " << cog->label << '\n';
             } else {
-                row += ",,";
+                results << ",,";
             }
 
-            if (const auto fatigue = sdk->fatigue()) {
-                row += "," + std::to_string(static_cast<int>(fatigue->level)) + "," +
-                       fatigue_label(fatigue->level);
-                if (!status.empty()) { status += "  |  "; }
-                status += "Fatigue=";
-                status += fatigue_label(fatigue->level);
+            // Fatigue: updates about every 120 seconds.
+            if (auto fatigue = sdk.get_fatigue_level()) {
+                results << ',' << static_cast<int>(fatigue->level) << ',' << fatigue->label;
+                std::cout << "  Fatigue: " << fatigue->label << '\n';
             } else {
-                row += ",,";
+                results << ",,";
             }
 
-            results << row << '\n' << std::flush;
-            ++rows;
-            std::cout << '[' << fixed2(elapsed) << "s] "
-                      << (status.empty() ? "(warming up...)" : status) << '\n'
-                      << std::flush;
-
+            results << '\n';
             std::this_thread::sleep_for(std::chrono::seconds{1});
         }
 
-        if (g_interrupted) { std::cout << "\n[TheiaSDK] Interrupted\n"; }
+        if (g_interrupted) { std::cout << "\n[TheiaSDK] Interrupted by user\n"; }
         std::cout << "[TheiaSDK] Stopping session\n";
-        session.stop();
-    } catch (const het::Error& e) {
+        sdk.stop_processing();
+        std::cout << "[TheiaSDK] Results saved to " << results_path << '\n';
+    } catch (const het::LeaseVerificationError& e) {
+        std::cerr << "[TheiaSDK] Lease rejected: " << e.what() << "\n"
+                  << "Set THEIA_LEASE to a valid device lease "
+                     "(contact support@harmoneyes.com if you don't have one).\n";
+        return 1;
+    } catch (const std::exception& e) {
         std::cerr << "[TheiaSDK] " << e.what() << '\n';
         return 1;
-    }
-
-    if (results) {
-        std::cout << "[TheiaSDK] Results saved to " << results_path << " (" << rows << " rows)\n";
     }
     return 0;
 }

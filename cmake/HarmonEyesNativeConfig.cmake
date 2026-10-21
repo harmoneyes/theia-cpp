@@ -7,12 +7,8 @@
 #   harmoneyes_native_copy_runtime(my_app)
 #
 # This file is used in place, straight from a clone. There is no build or
-# install step: the package IS the repository.
-#
-# The platform table below deliberately mirrors the Python SDK's
-# _get_platform_info() (HarmonEyesTheia/harmoneyes_theia/__init__.py:18-69),
-# including its refusal of Intel macOS, so both SDKs give one diagnosis for an
-# unsupported host.
+# install step: the package IS the repository. The supported platforms are
+# the same as the Python SDK's.
 
 include(CMakeFindDependencyMacro)
 
@@ -80,47 +76,37 @@ set(HarmonEyesNative_PLATFORM "${_hen_platform}")
 
 set(_hen_libdir  "${HARMONEYES_NATIVE_ROOT}/vendor/${_hen_platform}")
 set(_hen_libpath "${_hen_libdir}/${_hen_libname}")
-set(_hen_cincdir "${HARMONEYES_NATIVE_ROOT}/vendor/include")
+set(_hen_includes "${HARMONEYES_NATIVE_ROOT}/include" "${HARMONEYES_NATIVE_ROOT}/vendor/include")
 
-# The header-only C++ layer. Listed only when present: CMake rejects a
-# non-existent path in INTERFACE_INCLUDE_DIRECTORIES, and vendoring the
-# library is a separate step from shipping the headers.
-set(_hen_includes "${_hen_cincdir}")
-if(IS_DIRECTORY "${HARMONEYES_NATIVE_ROOT}/include")
-    list(PREPEND _hen_includes "${HARMONEYES_NATIVE_ROOT}/include")
-endif()
+# The webcam gaze engine, shared by every platform. Exposed so applications
+# can install it alongside themselves; see README.md.
+set(HarmonEyesNative_WEBCAM_SIDECAR_DIR "${HARMONEYES_NATIVE_ROOT}/vendor/webcam-sidecar")
 
-# A clone without Git LFS smudging leaves a ~130-byte text pointer in place of
-# each binary, so EXISTS alone cannot tell "absent" from "not fetched".
+# The binaries are stored with Git LFS. A clone without it leaves a ~130-byte
+# text pointer in place of each one, so EXISTS alone cannot tell "absent"
+# from "not fetched".
 function(_hen_require_binary path what)
     if(NOT EXISTS "${path}")
-        # Two very different causes, and telling a customer to run `git lfs
-        # pull` when the platform was never built sends them hunting for a
-        # problem on their machine. The directory's presence separates them.
-        get_filename_component(_hen_platform_dir "${path}" DIRECTORY)
-        if(NOT EXISTS "${_hen_platform_dir}")
-            message(FATAL_ERROR
-                "HarmonEyesNative: this release does not ship a build for "
-                "${HarmonEyesNative_PLATFORM}.\n"
-                "  expected: ${path}\n"
-                "See the platform table in README.md for what is currently "
-                "published, and contact sales@harmoneyes.com if you need this one.")
-        endif()
         message(FATAL_ERROR
-            "HarmonEyesNative: no vendored ${what} for ${HarmonEyesNative_PLATFORM}.\n"
+            "HarmonEyesNative: this release does not include the ${what} for "
+            "${HarmonEyesNative_PLATFORM}.\n"
             "  expected: ${path}\n"
-            "This repository stores its binaries with Git LFS. On a fresh clone run:\n"
-            "  git lfs install && git lfs pull")
+            "Contact support@harmoneyes.com if you need this platform.")
     endif()
     file(SIZE "${path}" _size)
     if(_size LESS 4096)
         message(FATAL_ERROR
-            "HarmonEyesNative: ${what} is a Git LFS pointer (${_size} bytes), not the "
-            "real binary.\n  ${path}\nRun: git lfs install && git lfs pull")
+            "HarmonEyesNative: ${path} is a Git LFS pointer, not the real file.\n"
+            "Run: git lfs install && git lfs pull")
     endif()
 endfunction()
 
 _hen_require_binary("${_hen_libpath}" "library")
+
+if(IS_DIRECTORY "${HarmonEyesNative_WEBCAM_SIDECAR_DIR}")
+    _hen_require_binary("${HarmonEyesNative_WEBCAM_SIDECAR_DIR}/tobii/nexus_wasm.wasm"
+                        "webcam engine")
+endif()
 
 # Windows cannot link a bare DLL; CMake requires the import library.
 if(_hen_implib)
@@ -136,8 +122,15 @@ if(NOT TARGET HarmonEyesNative::theia)
     set_target_properties(HarmonEyesNative::theia PROPERTIES
         IMPORTED_LOCATION             "${_hen_libpath}"
         INTERFACE_INCLUDE_DIRECTORIES "${_hen_includes}"
-        INTERFACE_COMPILE_FEATURES    cxx_std_17
-        INTERFACE_COMPILE_DEFINITIONS THEIA_HAS_PUPIL_LABS)
+        INTERFACE_COMPILE_FEATURES    cxx_std_17)
+
+    # Lets NexusWebcamTracker find the bundled sidecar with no configuration
+    # when run from a build tree.
+    if(IS_DIRECTORY "${HarmonEyesNative_WEBCAM_SIDECAR_DIR}")
+        set_property(TARGET HarmonEyesNative::theia APPEND PROPERTY
+            INTERFACE_COMPILE_DEFINITIONS
+            "HARMONEYES_THEIA_WEBCAM_SIDECAR_DIR=\"${HarmonEyesNative_WEBCAM_SIDECAR_DIR}\"")
+    endif()
 
     if(_hen_implib)
         set_target_properties(HarmonEyesNative::theia PROPERTIES
@@ -154,13 +147,13 @@ endif()
 
 # --- runtime placement helper ------------------------------------------------
 
-# The Python SDK loads its binary by absolute path, so it never needs a search
-# path. CMake has no equivalent, so consumers call this to put the shared
-# library next to their executable and set a relative rpath.
+# Puts the shared library next to the executable and sets a relative rpath,
+# so the build tree runs with no further setup.
 #
-# This covers the BUILD tree only. Shipping the library with an installed
-# binary is the consumer's job:
+# This covers the BUILD tree only. To ship the library with an installed
+# binary (and the webcam sidecar, if you use the webcam):
 #   install(FILES $<TARGET_FILE:HarmonEyesNative::theia> DESTINATION bin)
+#   install(DIRECTORY "${HarmonEyesNative_WEBCAM_SIDECAR_DIR}/" DESTINATION bin/webcam-sidecar)
 function(harmoneyes_native_copy_runtime target)
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -184,5 +177,4 @@ unset(_hen_libdir)
 unset(_hen_libpath)
 unset(_hen_implibpath)
 unset(_hen_includes)
-unset(_hen_cincdir)
 unset(_hen_osx_arch_count)

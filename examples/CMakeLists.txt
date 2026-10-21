@@ -1,9 +1,9 @@
-# One self-contained program per device, mirroring the Python SDK's examples.
+# One self-contained program per device, mirroring the Python SDK's examples,
+# plus the smallest complete program.
 set(HARMONEYES_EXAMPLES
+    quickstart
     theia-pupil-labs-streaming
-    theia-pupil-labs-batch
     theia-ganzin-streaming
-    theia-tobii-g3
     theia-webcam-streaming
 )
 

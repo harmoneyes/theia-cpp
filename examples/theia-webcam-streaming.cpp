@@ -1,55 +1,43 @@
-// HarmonEyes Theia SDK Example: Webcam (Tobii Nexus)
+// HarmonEyes Theia SDK Example: Webcam
 //
-// Streams gaze from a webcam and prints cognitive load, fatigue, attention and
-// mental readiness once a second. WebcamSource spawns a Node sidecar hosting
-// the Tobii Nexus engine, and a TrackerPump feeds its samples into the SDK.
+// Uses your webcam to estimate gaze and prints real-time cognitive load,
+// fatigue, attention and mental readiness, saving them to results/.
 //
 // Prerequisites:
-//   1. export THEIA_LEASE=...               device lease
-//   2. export THEIA_TOBII_LICENSE_FILE=...  Tobii engine licence
-//      (contact sales@harmoneyes.com if you don't have either)
-//   3. Node.js 20+ on your PATH, and a connected webcam
-//
-// Set the screen geometry below to your actual display.
+//   1. A device lease in THEIA_LEASE (contact support@harmoneyes.com if you
+//      don't have one).
+//   2. Node.js 20+ on your PATH (the webcam gaze engine runs on Node).
+//   3. A connected webcam.
 //
 // Usage:
+//   export THEIA_LEASE=...
 //   ./theia-webcam-streaming
 
-#include <harmoneyes/theia/errors.hpp>
-#include <harmoneyes/theia/nexus_webcam.hpp>
-#include <harmoneyes/theia/sdk.hpp>
-#include <harmoneyes/theia/tracker.hpp>
+#include <harmoneyes/theia.hpp>
+#include <harmoneyes/theia_webcam.hpp>
 
 #include <chrono>
 #include <csignal>
-#include <cstdlib>
-#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <memory>
 #include <random>
 #include <sstream>
 #include <string>
-#include <system_error>
 #include <thread>
 
-namespace het  = harmoneyes::theia;
-namespace hetn = harmoneyes::theia::nexus;
+namespace het = harmoneyes::theia;
 
-constexpr double kCollectionSeconds = 400.0;
+// Fatigue updates every ~120 s, so 400 s captures at least three updates.
+constexpr std::chrono::seconds kCollectionDuration{400};
 
 namespace {
 
-std::string lease_from_env()
-{
-    if (const char* v = std::getenv("THEIA_LEASE")) { return v; }
-    if (const char* v = std::getenv("THEIA_LICENSE_KEY")) { return v; }
-    return {};
-}
+volatile std::sig_atomic_t g_interrupted = 0;
+void on_interrupt(int) { g_interrupted = 1; }
 
-std::string session_id()
+std::string new_session_id()
 {
     std::random_device rd;
     std::ostringstream out;
@@ -58,199 +46,90 @@ std::string session_id()
     return out.str();
 }
 
-const char* cog_load_label(het::CogLoadLevel level)
-{
-    switch (level) {
-        case het::CogLoadLevel::Low:      return "Low";
-        case het::CogLoadLevel::Moderate: return "Moderate";
-        case het::CogLoadLevel::High:     return "High";
-    }
-    return "Unknown";
-}
-
-const char* fatigue_label(het::SleepinessLevel level)
-{
-    switch (level) {
-        case het::SleepinessLevel::Alert:            return "Alert";
-        case het::SleepinessLevel::SomewhatFatigued: return "Somewhat Fatigued";
-        case het::SleepinessLevel::Fatigued:         return "Fatigued";
-    }
-    return "Unknown";
-}
-
-std::string fixed2(double value)
-{
-    std::ostringstream out;
-    out << std::fixed << std::setprecision(2) << value;
-    return out.str();
-}
-
-std::ofstream open_results(const std::string& name, const std::string& header, std::string& path)
-{
-    std::error_code ec;
-    std::filesystem::create_directories("results", ec);
-
-    const std::time_t now = std::time(nullptr);
-    std::tm           tm{};
-#ifdef _WIN32
-    ::localtime_s(&tm, &now);
-#else
-    ::localtime_r(&now, &tm);
-#endif
-    std::ostringstream stamp;
-    stamp << std::put_time(&tm, "%Y%m%d_%H%M%S");
-
-    path = "results/" + name + "_" + stamp.str() + ".csv";
-    std::ofstream out{path};
-    if (out) { out << header << '\n'; }
-    return out;
-}
-
-volatile std::sig_atomic_t g_interrupted = 0;
-void on_sigint(int) { g_interrupted = 1; }
-
 }  // namespace
 
 int main()
 {
-    std::signal(SIGINT, on_sigint);
-
-    het::Options options;
-    options.lease_token   = lease_from_env();
-    options.config.device = het::DeviceType::Nexus;
-
-    std::unique_ptr<het::TheiaSDK> sdk;
-    try {
-        sdk = std::make_unique<het::TheiaSDK>(std::move(options));
-    } catch (const het::LeaseVerificationError& e) {
-        std::cerr << "[TheiaSDK] Lease rejected: " << e.what() << "\n"
-                  << "Set THEIA_LEASE to a valid device lease "
-                     "(contact sales@harmoneyes.com if you don't have one).\n";
-        return 1;
-    } catch (const het::Error& e) {
-        std::cerr << "[TheiaSDK] Could not start: " << e.what() << '\n';
-        return 1;
-    }
-
-    hetn::WebcamSource::Config camera;
-    camera.frame_width          = 640;
-    camera.frame_height         = 480;
-    camera.fps                  = 30;
-    camera.screen_width_mm      = 336;
-    camera.screen_height_mm     = 210;
-    camera.screen_res_width_px  = 1920;
-    camera.screen_res_height_px = 1080;
+    std::signal(SIGINT, on_interrupt);
 
     try {
-        camera.license = hetn::TobiiLicense::from_env();
-    } catch (const std::exception& e) {
-        std::cerr << "[TheiaSDK] " << e.what() << '\n';
-        return 1;
-    }
+        het::TheiaSDK sdk{het::Device::Webcam};
 
-    std::string   results_path;
-    std::ofstream results = open_results(
-        "webcam_session",
-        "elapsed_s,cog_load,cog_load_label,fatigue,fatigue_label,attention_level,attention_label",
-        results_path);
-    std::size_t rows = 0;
+        // The webcam gaze source. Starting the data stream (below) opens the
+        // camera and starts the gaze engine.
+        het::NexusWebcamTracker webcam;
+        sdk.set_tracker(webcam);
 
-    hetn::WebcamSource source{std::move(camera)};
-    try {
-        std::cout << "[TheiaSDK] Opening the camera and starting the gaze sidecar\n";
-        source.start();
-    } catch (const std::exception& e) {
-        std::cerr << "[TheiaSDK] Webcam source failed: " << e.what() << '\n';
-        return 1;
-    }
+        const std::string session_id = new_session_id();
+        std::cout << "[TheiaSDK] Starting session " << session_id << '\n';
+        sdk.start_new_session(session_id);
 
-    try {
-        const std::string id = session_id();
-        std::cout << "[TheiaSDK] Starting session " << id << '\n';
-        auto session = sdk->start_session(id);
+        std::cout << "[TheiaSDK] Starting webcam + gaze engine\n";
+        sdk.start_realtime_data();
 
-        het::TrackerPump::Options pump_options;
-        pump_options.on_stall = [](double idle_seconds) {
-            if (idle_seconds > 0.0) {
-                std::cerr << "[TheiaSDK] No samples for " << idle_seconds << "s\n";
-            }
-        };
-        pump_options.on_error = [](const std::exception& e) {
-            std::cerr << "[TheiaSDK] Pump error: " << e.what() << '\n';
-        };
+        std::filesystem::create_directories("results");
+        const std::string results_path = "results/webcam_session_" + session_id.substr(0, 8) + ".csv";
+        std::ofstream     results{results_path};
+        results << "elapsed_s,cog_load,cog_load_label,fatigue,fatigue_label,"
+                   "attention_level,attention_label\n";
 
-        het::TrackerPump pump{*sdk, source, std::move(pump_options)};
-        pump.start();
-
-        std::cout << "Collecting for " << kCollectionSeconds << "s -- Ctrl+C to stop early\n\n";
+        std::cout << "Collecting data for " << kCollectionDuration.count()
+                  << "s -- Ctrl+C to stop early\n\n";
 
         const auto start = std::chrono::steady_clock::now();
-        while (!g_interrupted) {
+        while (!g_interrupted && std::chrono::steady_clock::now() - start < kCollectionDuration) {
             const double elapsed =
                 std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-            if (elapsed >= kCollectionSeconds) { break; }
+            results << std::fixed << std::setprecision(2) << elapsed;
+            std::ostringstream status;
+            status << std::fixed << std::setprecision(1);
 
-            std::string row = fixed2(elapsed);
-            std::string status;
-
-            if (const auto cog = sdk->cog_load()) {
-                row += "," + std::to_string(static_cast<int>(cog->level)) + "," +
-                       cog_load_label(cog->level);
-                status += "CogLoad=";
-                status += cog_load_label(cog->level);
+            if (auto cog = sdk.get_cog_load()) {
+                results << ',' << static_cast<int>(cog->level) << ',' << cog->label;
+                status << "  CogLoad=" << cog->label;
             } else {
-                row += ",,";
+                results << ",,";
             }
 
-            if (const auto fatigue = sdk->fatigue()) {
-                row += "," + std::to_string(static_cast<int>(fatigue->level)) + "," +
-                       fatigue_label(fatigue->level);
-                if (!status.empty()) { status += "  |  "; }
-                status += "Fatigue=";
-                status += fatigue_label(fatigue->level);
+            if (auto fatigue = sdk.get_fatigue_level()) {
+                results << ',' << static_cast<int>(fatigue->level) << ',' << fatigue->label;
+                status << "  Fatigue=" << fatigue->label;
             } else {
-                row += ",,";
+                results << ",,";
             }
 
-            if (const auto attention = sdk->attention()) {
-                row += "," + std::to_string(static_cast<int>(attention->level)) + "," +
-                       attention->label;
-                if (!status.empty()) { status += "  |  "; }
-                status += "Attention=" + attention->label;
+            if (auto attention = sdk.get_attention_style()) {
+                results << ',' << static_cast<int>(attention->level) << ',' << attention->label;
+                status << "  Attention=" << attention->label;
             } else {
-                row += ",,";
+                results << ",,";
             }
 
-            if (const auto readiness = sdk->mental_readiness(elapsed)) {
-                if (!status.empty()) { status += "  |  "; }
-                status += "Readiness lo=" + fixed2(readiness->low_percentage) +
-                          "% mod=" + fixed2(readiness->moderate_percentage) +
-                          "% hi=" + fixed2(readiness->high_percentage) + "%";
+            if (auto readiness = sdk.get_mental_readiness(elapsed)) {
+                status << "  Readiness: lo=" << readiness->low_percentage
+                       << "% mod=" << readiness->moderate_percentage
+                       << "% hi=" << readiness->high_percentage << '%';
             }
 
-            results << row << '\n' << std::flush;
-            ++rows;
-            std::cout << '[' << fixed2(elapsed) << "s] "
-                      << (status.empty() ? "(warming up...)" : status) << '\n'
-                      << std::flush;
-
+            results << '\n';
+            const std::string line = status.str();
+            std::cout << '[' << std::fixed << std::setprecision(1) << std::setw(5) << elapsed << "s]"
+                      << (line.empty() ? "  (warming up...)" : line) << std::endl;
             std::this_thread::sleep_for(std::chrono::seconds{1});
         }
 
-        if (g_interrupted) { std::cout << "\n[TheiaSDK] Interrupted\n"; }
-        std::cout << "[TheiaSDK] Stopping\n";
-        pump.stop();
-        session.stop();
+        if (g_interrupted) { std::cout << "\n[TheiaSDK] Interrupted by user\n"; }
+        std::cout << "[TheiaSDK] Stopping session\n";
+        sdk.stop_processing();
+        std::cout << "[TheiaSDK] Results saved to " << results_path << '\n';
+    } catch (const het::LeaseVerificationError& e) {
+        std::cerr << "[TheiaSDK] Lease rejected: " << e.what() << "\n"
+                  << "Set THEIA_LEASE to a valid device lease "
+                     "(contact support@harmoneyes.com if you don't have one).\n";
+        return 1;
     } catch (const std::exception& e) {
         std::cerr << "[TheiaSDK] " << e.what() << '\n';
-        source.close();
         return 1;
-    }
-
-    source.close();
-
-    if (results) {
-        std::cout << "[TheiaSDK] Results saved to " << results_path << " (" << rows << " rows)\n";
     }
     return 0;
 }
