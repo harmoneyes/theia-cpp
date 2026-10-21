@@ -31,6 +31,9 @@ harmoneyes_native_copy_runtime(my_app)
 - **Platforms:** Linux x86_64. Linux aarch64, macOS arm64 (Apple Silicon) and
   Windows x86_64 are coming; CMake reports clearly if your platform is not in
   this release.
+- **On Linux,** the system's libcurl 4 and OpenSSL 3. Ubuntu 22.04+ and
+  Debian 12+ ship them; minimal and container images may not, so install them
+  with `apt install libcurl4 libssl3`.
 - **Device Lease:** a valid device lease is required to use the SDK — see below.
 
 ## Device Lease
