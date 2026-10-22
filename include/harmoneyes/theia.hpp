@@ -7,7 +7,7 @@
 ///     #include <harmoneyes/theia.hpp>
 ///     namespace het = harmoneyes::theia;
 ///
-///     het::TheiaSDK sdk{het::Device::PupilLabsNeon};   // lease from $THEIA_LEASE
+///     het::TheiaSDK sdk{het::Device::PupilLabsNeon};   // lease: see README, "Device lease"
 ///     sdk.start_new_session(session_uuid);
 ///     sdk.start_realtime_data();
 ///     ...poll sdk.get_cog_load() and sdk.get_fatigue_level() once a second...
@@ -36,6 +36,12 @@ inline constexpr std::string_view kVersion = "1.1.0";
 
 /// Version of the native Theia library.
 [[nodiscard]] std::string version();
+
+/// The name this machine registers under when the SDK obtains its own lease:
+/// "theia-" and 32 hex digits, a hash of the OS machine ID (which never
+/// leaves the machine). Empty where the OS has none; set
+/// Options::lease_device_identifier there.
+[[nodiscard]] std::string machine_device_identifier();
 
 // -- Errors ---------------------------------------------------------------
 
@@ -66,6 +72,10 @@ class LeaseExpiredError : public LeaseVerificationError { using LeaseVerificatio
 class LeaseDeviceMismatchError : public LeaseVerificationError { using LeaseVerificationError::LeaseVerificationError; };
 /// The lease was issued for a different tenant.
 class LeaseTenantMismatchError : public LeaseVerificationError { using LeaseVerificationError::LeaseVerificationError; };
+/// HarmonEyes could not renew the lease or issue a new one: it refused (the
+/// device was removed, the API key revoked) or could not be reached. The
+/// message says which. Any lease the SDK already holds is kept.
+class LeaseRenewalError : public LeaseVerificationError { using LeaseVerificationError::LeaseVerificationError; };
 
 // -- Results --------------------------------------------------------------
 
@@ -368,10 +378,28 @@ struct Options {
     Device device = Device::PupilLabsNeon;
 
     /// Your device lease. Left empty, the SDK reads $THEIA_LEASE, then
-    /// $THEIA_LICENSE_KEY.
+    /// $THEIA_LICENSE_KEY. Not needed with lease_file or an API key.
     std::string lease_token;
     std::string lease_expected_device_id;  ///< optional: require the lease to name this device
     std::string lease_expected_tenant_id;  ///< optional: require the lease to name this tenant
+
+    /// Where this machine keeps its lease. The SDK starts from it (or from
+    /// lease_token, whichever is newer) and replaces it, readable by you
+    /// only, each time it renews or obtains a lease. Empty uses
+    /// $THEIA_LEASE_FILE.
+    std::string lease_file;
+    /// Your API key. With it, a machine that has no lease, or whose lease
+    /// expired while it was offline, obtains one by itself. Empty uses
+    /// $THEIA_API_KEY_ID and $THEIA_API_KEY_SECRET.
+    std::string lease_api_key_id;
+    std::string lease_api_key_secret;
+    /// This machine's name when it obtains a lease. Empty uses
+    /// machine_device_identifier(). Set it (to a serial number, say) where
+    /// machines are cloned from one disk image and may share an OS machine ID.
+    std::string lease_device_identifier;
+    /// The SDK renews its lease in the background before it is due to
+    /// expire. Set this to turn that off; renew_lease() still works.
+    bool disable_lease_auto_renew = false;
 
     bool enable_cog_load_model = true;
     bool enable_fatigue_model  = true;
@@ -383,6 +411,27 @@ struct Options {
     std::function<void(const std::string&)>   on_log;
     std::function<void(const CogLoadResult&)> on_cog_load;
     std::function<void(const FatigueResult&)> on_fatigue;
+    /// Each lease the SDK renews or obtains, as it does. Only needed to keep
+    /// the lease somewhere other than lease_file.
+    std::function<void(const std::string&)>  on_lease_renewed;
+};
+
+/// The lease the SDK holds, and how keeping it current is going. Times are
+/// Unix seconds.
+struct LeaseInfo {
+    bool         has_lease = false;
+    std::string  device_id;
+    std::string  tenant_id;
+    std::string  lease_id;
+    std::int64_t issued_at     = 0;
+    std::int64_t refresh_after = 0;  ///< renewal is due from here
+    std::int64_t warn_after    = 0;  ///< worth telling someone from here, if it has not renewed
+    std::int64_t expires_at    = 0;  ///< the SDK will not start with this lease after it
+    bool         auto_renew   = false;
+    bool         can_activate = false;  ///< an API key is set and HarmonEyes has not refused it
+    std::string  lease_file;
+    std::int64_t last_renewal_attempt_unix_ms = 0;  ///< 0 = none yet
+    std::string  last_renewal_error;                ///< empty if the last attempt succeeded
 };
 
 // -- The SDK --------------------------------------------------------------
@@ -545,6 +594,13 @@ public:
     /// Swap in a renewed lease without restarting. Keeps the old lease and
     /// throws a LeaseVerificationError subclass if the new one is rejected.
     void set_lease_token(const std::string& lease_token);
+
+    /// Renew the lease now rather than when it is due. Throws
+    /// LeaseRenewalError if HarmonEyes refuses or cannot be reached, keeping
+    /// the current lease.
+    void renew_lease();
+
+    [[nodiscard]] LeaseInfo lease_info() const;
 
 private:
     struct State;

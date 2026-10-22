@@ -45,29 +45,76 @@ harmoneyes_native_copy_runtime(my_app)
 
 ## Device Lease
 
-The SDK authenticates with a **device lease**: a signed, time-boxed token
-verified entirely offline, so a customer machine never calls home to log in.
-(It does still reach the model CDN; see
-[Environment variables](#environment-variables) if you need to allowlist or
-redirect that.)
+The SDK authenticates with a **device lease**: a signed token for one machine,
+verified offline, so a machine keeps working without a connection until its
+lease expires. How long that is, your **offline window** (a number of days),
+is set on your HarmonEyes account. While a machine is online, the SDK keeps
+its lease current by itself. Besides that, it reaches only the model CDN (see
+[Environment variables](#environment-variables) to allowlist or redirect
+either).
 
-**Getting your first lease:** contact support@harmoneyes.com. HarmonEyes staff
-issues a lease for your device and sends you the token. Leases are per
-machine: each needs its own, and a new lease for a machine replaces the one
-it had.
+### Recommended: let the SDK manage the lease
 
-**Using it:** set `THEIA_LEASE` in your environment and the SDK picks it up, or
-set `Options::lease_token` in code. `THEIA_LICENSE_KEY` is accepted too.
+Set these on each machine, or the `Options` fields of the same names
+(`lease_api_key_id`, `lease_api_key_secret`, `lease_file`):
 
 ```bash
-export THEIA_LEASE="<the token you were given>"
+export THEIA_API_KEY_ID="<your API key ID>"
+export THEIA_API_KEY_SECRET="<your API key secret>"
+export THEIA_LEASE_FILE="/var/lib/my-app/theia-lease"   # any path your app can write
 ```
+
+Nothing else is needed:
+
+- **On first start** the SDK obtains a lease for the machine from HarmonEyes
+  (HTTPS to `identity.harmoneyes.io`) and saves it in the lease file,
+  readable by your user only.
+- **From then on** it renews the lease in the background before it is due,
+  retrying every 30 minutes while HarmonEyes cannot be reached. The machine
+  runs offline until its lease expires.
+- **A machine offline for longer than its window** gets a new lease the next
+  time it starts online.
+- **Each machine registers as** `het::machine_device_identifier()`, a hash of
+  its OS machine ID. Machines cloned from one disk image can share that ID;
+  give each its own `Options::lease_device_identifier` (a serial number, say).
+- `sdk.lease_info()` reports when the lease expires and how the last renewal
+  went.
+
+Your API key can obtain leases for any number of machines on your account, so
+keep it as you would a password. HarmonEyes can list your machines and remove
+one; a removed machine, or one whose API key was revoked, stops renewing and
+does not get a new lease by itself.
+
+### Without the API key on each machine
+
+Give each machine its first lease and a lease file (`THEIA_LEASE_FILE`), and
+put the lease in that file. The SDK renews it from then on; only a machine
+that stays offline for longer than its window needs a new first lease. Get
+first leases from support@harmoneyes.com, or with your API key, from an admin
+machine:
+
+```bash
+token=$(curl -s -u "$THEIA_API_KEY_ID:$THEIA_API_KEY_SECRET" https://identity.harmoneyes.io/oidc/token \
+  -d grant_type=client_credentials -d scope=account -d resource=https://identity.harmoneyes.io/api |
+  sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
+curl -s https://identity.harmoneyes.io/api/leases -H "Authorization: Bearer $token" \
+  -H 'Content-Type: application/json' -d '{"deviceIdentifier":"booth-2"}'
+# {"lease":"..."}: one lease per machine, each with its own deviceIdentifier
+```
+
+A lease can also be passed directly, in `THEIA_LEASE` (or `THEIA_LICENSE_KEY`)
+or `Options::lease_token`. With a lease file set too, the SDK starts from
+whichever is newer; without one, nothing keeps a renewed lease across
+restarts.
+
+### Errors
 
 An invalid, expired, or missing lease throws `LeaseVerificationError` (or a
 more specific subclass such as `LeaseExpiredError`) when constructing
-`TheiaSDK`, before any device or model work happens. **Leases expire** —
-request a new one the same way you got the first; a long-running process can
-swap it in with `sdk.set_lease_token(new_token)`.
+`TheiaSDK`, before any device or model work happens. `LeaseRenewalError`, also
+a `LeaseVerificationError`, means HarmonEyes refused a lease or could not be
+reached; its message says which. A running process can swap in a lease
+obtained elsewhere with `sdk.set_lease_token(lease)`.
 
 ## Quick start
 
@@ -240,7 +287,7 @@ The method names are the same. The differences are the ones C++ makes natural:
 
 | Python | C++ |
 |---|---|
-| `TheiaSDK(lease_token=..., platform="PL")` | `TheiaSDK{Device::PupilLabsNeon}` (lease from `THEIA_LEASE`), or `TheiaSDK{options}` |
+| `TheiaSDK(lease_token=..., platform="PL")` | `TheiaSDK{Device::PupilLabsNeon}` (lease: see [Device Lease](#device-lease)), or `TheiaSDK{options}` |
 | `get_cog_load_levels()` → `(dict, batch, lookahead)` | `get_cog_load()` → `std::optional<CogLoadResult>` |
 | `get_fatigue_level()` → `(dict, batch)` | `get_fatigue_level()` → `std::optional<FatigueResult>` |
 | `get_attention_style()` / `get_mental_readiness(t)` → `dict` or `None` | same names → `std::optional<…>` |
@@ -286,6 +333,8 @@ All optional. Those marked — can only be set through the environment.
 | Variable | Used for | In code |
 |---|---|---|
 | `THEIA_LEASE` (or `THEIA_LICENSE_KEY`) | your device lease | `Options::lease_token` |
+| `THEIA_LEASE_FILE` | where the machine keeps its lease | `Options::lease_file` |
+| `THEIA_API_KEY_ID`, `THEIA_API_KEY_SECRET` | your API key, for obtaining leases | `Options::lease_api_key_id`, `lease_api_key_secret` |
 | `THEIA_MODEL_CACHE_DIR` | where downloaded models are cached | `Options::model_cache_dir` |
 | `THEIA_MODEL_CDN_URL` | where models are downloaded from | — |
 | `THEIA_DEVICE_API_URL` | the HarmonEyes API used by `enable_alert_sync()` | its `api_base_url` |

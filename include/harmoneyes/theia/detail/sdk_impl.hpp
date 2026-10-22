@@ -26,6 +26,12 @@ inline std::string version()
     return v ? std::string{v} : std::string{};
 }
 
+inline std::string machine_device_identifier()
+{
+    const char* id = ::theia_machine_device_identifier();
+    return id ? std::string{id} : std::string{};
+}
+
 inline const char* to_string(CogLoadLevel level) noexcept
 {
     switch (level) {
@@ -127,16 +133,17 @@ namespace harmoneyes::theia::detail {
 
 // -- Return codes --
 //
-// Only creating the SDK and setting the lease record why they failed; every
-// other call reports failure with -1 alone. So the recorded reason is read
-// only after those two, never after anything else, where it would describe
-// some earlier failure.
+// Only creating the SDK, setting the lease and renewing it record why they
+// failed; every other call reports failure with -1 alone. So the recorded
+// reason is read only after those three, never after anything else, where it
+// would describe some earlier failure.
 //
 // Nothing here may be called from a callback trampoline: an exception must
 // not unwind through the library's frames.
 
 /// Throw the recorded failure. Only valid straight after a failed
-/// theia_sdk_create() or theia_sdk_set_lease_token() on this thread.
+/// theia_sdk_create(), theia_sdk_set_lease_token() or theia_sdk_renew_lease()
+/// on this thread.
 [[noreturn]] inline void throw_recorded_error(const char* context)
 {
     const int   code   = static_cast<int>(::theia_get_last_error_code());
@@ -152,6 +159,7 @@ namespace harmoneyes::theia::detail {
         case THEIA_ERROR_LEASE_EXPIRED:         throw LeaseExpiredError{message};
         case THEIA_ERROR_LEASE_DEVICE_MISMATCH: throw LeaseDeviceMismatchError{message};
         case THEIA_ERROR_LEASE_TENANT_MISMATCH: throw LeaseTenantMismatchError{message};
+        case THEIA_ERROR_LEASE_RENEWAL:         throw LeaseRenewalError{message};
         default:                                throw Error{message};
     }
 }
@@ -513,6 +521,13 @@ struct TheiaSDK::State {
         try { self->options.on_fatigue(detail::to_fatigue(result)); } catch (...) {}
     }
 
+    static void on_lease_renewed(const char* lease_token, void* user_data) noexcept
+    {
+        auto* self = static_cast<State*>(user_data);
+        if (self == nullptr || !self->options.on_lease_renewed) { return; }
+        try { self->options.on_lease_renewed(detail::copy_borrowed(lease_token)); } catch (...) {}
+    }
+
     static void on_alert(::alert_event_t event, void* user_data) noexcept
     {
         auto* self = static_cast<State*>(user_data);
@@ -551,9 +566,21 @@ inline TheiaSDK::TheiaSDK(Options options)
     if (!o.lease_expected_tenant_id.empty()) { c.lease_expected_tenant_id = o.lease_expected_tenant_id.c_str(); }
     if (!o.model_cache_dir.empty())          { c.model_cache_dir = o.model_cache_dir.c_str(); }
 
+    // Left empty, the library reads $THEIA_LEASE_FILE, $THEIA_API_KEY_ID and
+    // $THEIA_API_KEY_SECRET itself.
+    if (!o.lease_file.empty())              { c.lease_file = o.lease_file.c_str(); }
+    if (!o.lease_api_key_id.empty())        { c.lease_api_key_id = o.lease_api_key_id.c_str(); }
+    if (!o.lease_api_key_secret.empty())    { c.lease_api_key_secret = o.lease_api_key_secret.c_str(); }
+    if (!o.lease_device_identifier.empty()) { c.lease_device_identifier = o.lease_device_identifier.c_str(); }
+    c.disable_lease_auto_renew = o.disable_lease_auto_renew ? 1 : 0;
+
     if (o.on_log)      { c.log_callback = &State::on_log;               c.log_callback_user_data = state_.get(); }
     if (o.on_cog_load) { c.cog_load_ace_callback = &State::on_cog_load; c.cog_load_ace_callback_user_data = state_.get(); }
     if (o.on_fatigue)  { c.fatigue_callback = &State::on_fatigue;       c.fatigue_callback_user_data = state_.get(); }
+    if (o.on_lease_renewed) {
+        c.lease_renewed_callback           = &State::on_lease_renewed;
+        c.lease_renewed_callback_user_data = state_.get();
+    }
 
     // output_dir stays null: the SDK writes no session data to disk.
 
@@ -960,6 +987,31 @@ inline void TheiaSDK::set_lease_token(const std::string& lease_token)
     if (::theia_sdk_set_lease_token(handle(), lease_token.c_str()) != 0) {
         detail::throw_recorded_error("set_lease_token");
     }
+}
+
+inline void TheiaSDK::renew_lease()
+{
+    if (::theia_sdk_renew_lease(handle()) != 0) { detail::throw_recorded_error("renew_lease"); }
+}
+
+inline LeaseInfo TheiaSDK::lease_info() const
+{
+    const ::lease_info_t c = ::theia_sdk_get_lease_info(handle());
+    LeaseInfo info;
+    info.has_lease                    = c.has_lease != 0;
+    info.device_id                    = detail::copy_borrowed(c.device_id);
+    info.tenant_id                    = detail::copy_borrowed(c.tenant_id);
+    info.lease_id                     = detail::copy_borrowed(c.lease_id);
+    info.issued_at                    = c.issued_at;
+    info.refresh_after                = c.refresh_after;
+    info.warn_after                   = c.warn_after;
+    info.expires_at                   = c.expires_at;
+    info.auto_renew                   = c.auto_renew != 0;
+    info.can_activate                 = c.can_activate != 0;
+    info.lease_file                   = detail::copy_borrowed(c.lease_file);
+    info.last_renewal_attempt_unix_ms = c.last_renewal_attempt_unix_ms;
+    info.last_renewal_error           = detail::copy_borrowed(c.last_renewal_error);
+    return info;
 }
 
 }  // namespace harmoneyes::theia
