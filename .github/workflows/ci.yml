@@ -83,7 +83,9 @@ jobs:
           - runner: windows-2022
             platform: windows-x86_64
             # Setting CMAKE_CXX_FLAGS replaces MSVC's defaults, /EHsc among them.
-            cxxflags: /W4 /WX /permissive- /EHsc
+            # Written with '-', which MSVC accepts too: Git Bash would rewrite
+            # '/W4' into a Windows path before CMake saw it.
+            cxxflags: -W4 -WX -permissive- -EHsc
     name: build (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
     defaults:
