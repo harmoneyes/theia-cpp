@@ -61,20 +61,34 @@ jobs:
             fi
           done
 
-  # Builds the examples the way a customer would (through find_package), and
-  # checks each library refuses to start without a device lease. Add macOS and
-  # Windows runners as their libraries are vendored. GitHub's arm64 runners
-  # are free for public repositories; a private one needs them enabled.
-  linux:
+  # Builds the examples the way a customer would (through find_package), with
+  # warnings as errors, and checks each library refuses to start without a
+  # device lease. macOS runs on 14, the oldest version the library is built to
+  # load on. GitHub's arm64 Linux runners are free for public repositories; a
+  # private one needs them enabled.
+  build:
     strategy:
       fail-fast: false
       matrix:
         include:
           - runner: ubuntu-24.04
             platform: linux-x86_64
+            cxxflags: -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror
           - runner: ubuntu-24.04-arm
             platform: linux-aarch64
+            cxxflags: -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror
+          - runner: macos-14
+            platform: macos-arm64
+            cxxflags: -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror
+          - runner: windows-2022
+            platform: windows-x86_64
+            # Setting CMAKE_CXX_FLAGS replaces MSVC's defaults, /EHsc among them.
+            cxxflags: /W4 /WX /permissive- /EHsc
+    name: build (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
@@ -82,12 +96,13 @@ jobs:
 
       - name: Build the examples
         run: |
-          cmake -S . -B build -DCMAKE_CXX_FLAGS="-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror"
-          cmake --build build --parallel
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="${{ matrix.cxxflags }}"
+          cmake --build build --config Release --parallel
 
       - name: The SDK refuses to start without a device lease
         run: |
-          lib="vendor/${{ matrix.platform }}/libtheia.so.0"
-          g++ -std=c++17 -Iinclude -Ivendor/include .github/ci/requires_lease.cpp \
-              "${lib}" -Wl,-rpath,"$PWD/vendor/${{ matrix.platform }}" -o requires_lease
-          env -u THEIA_LEASE -u THEIA_LICENSE_KEY ./requires_lease
+          cmake -S .github/ci -B build-ci -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="${{ matrix.cxxflags }}"
+          cmake --build build-ci --config Release
+          exe=build-ci/requires_lease
+          [ -f "${exe}" ] || exe=build-ci/Release/requires_lease.exe
+          env -u THEIA_LEASE -u THEIA_LICENSE_KEY "${exe}"

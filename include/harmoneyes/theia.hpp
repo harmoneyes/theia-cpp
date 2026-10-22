@@ -37,7 +37,7 @@ inline constexpr std::string_view kVersion = "0.1.0";
 /// Version of the native Theia library.
 [[nodiscard]] std::string version();
 
-// ── Errors ───────────────────────────────────────────────────────────────
+// -- Errors ---------------------------------------------------------------
 
 /// Base of every exception the SDK throws for a failure at run time.
 /// Misuse, such as calling start_realtime_data() twice, throws
@@ -67,7 +67,7 @@ class LeaseDeviceMismatchError : public LeaseVerificationError { using LeaseVeri
 /// The lease was issued for a different tenant.
 class LeaseTenantMismatchError : public LeaseVerificationError { using LeaseVerificationError::LeaseVerificationError; };
 
-// ── Results ──────────────────────────────────────────────────────────────
+// -- Results --------------------------------------------------------------
 
 /// Cognitive load band.
 enum class CogLoadLevel : int { Low = 0, Moderate = 1, High = 2 };
@@ -163,7 +163,7 @@ struct CogLoadModelSettings {
     float high_confidence_threshold = 0.70F;
 };
 
-// ── Alerts ───────────────────────────────────────────────────────────────
+// -- Alerts ---------------------------------------------------------------
 
 /// One alert that fired.
 struct AlertEvent {
@@ -225,7 +225,7 @@ struct AlertRulesStatus {
 /// Called once per fired alert, on the SDK's thread rather than yours.
 using AlertCallback = std::function<void(const AlertEvent&)>;
 
-// ── Devices and gaze sources ─────────────────────────────────────────────
+// -- Devices and gaze sources ---------------------------------------------
 
 /// Which eye tracker the SDK is set up for.
 enum class Device {
@@ -296,7 +296,7 @@ struct GazeSample {
     float eyelid_aperture_left_mm   = -8888.0F;
     float eyelid_aperture_right_mm  = -8888.0F;
 
-    // Head motion: acceleration in m/s², rotation rate in degrees/s, and
+    // Head motion: acceleration in m/s^2, rotation rate in degrees/s, and
     // orientation as a unit quaternion.
     float accel_x = -8888.0F;
     float accel_y = -8888.0F;
@@ -357,7 +357,7 @@ public:
     virtual void close() {}
 };
 
-// ── Options ──────────────────────────────────────────────────────────────
+// -- Options --------------------------------------------------------------
 
 /// How to construct the SDK. Every field has a usable default.
 ///
@@ -385,7 +385,7 @@ struct Options {
     std::function<void(const FatigueResult&)> on_fatigue;
 };
 
-// ── The SDK ──────────────────────────────────────────────────────────────
+// -- The SDK --------------------------------------------------------------
 
 /// The eye-tracking pipeline. Move-only; destroying it stops everything.
 class TheiaSDK {
@@ -401,7 +401,7 @@ public:
     TheiaSDK(const TheiaSDK&)            = delete;
     TheiaSDK& operator=(const TheiaSDK&) = delete;
 
-    // ── Sessions ──
+    // -- Sessions --
 
     /// Begin a session, stopping any session already open.
     void start_new_session(const std::string& session_uuid);
@@ -416,7 +416,7 @@ public:
 
     [[nodiscard]] bool is_running() const;
 
-    // ── Device connection ──
+    // -- Device connection --
 
     /// Use this gaze source. Device::Webcam and Device::Headset need either
     /// this or add_gaze_samples(). It cannot be changed while running.
@@ -442,7 +442,7 @@ public:
     /// Whether the gaze source stopped delivering samples.
     [[nodiscard]] bool has_connection_timeout() const;
 
-    // ── Gaze you collect yourself ──
+    // -- Gaze you collect yourself --
 
     /// Feed in gaze samples as your tracker delivers them: any number per
     /// call, in time order. For Device::Webcam and Device::Headset, in place
@@ -460,7 +460,7 @@ public:
     void add_gaze_samples(const GazeSample* samples, std::size_t count);
     void add_gaze_samples(const std::vector<GazeSample>& samples);
 
-    // ── Results ──
+    // -- Results --
     //
     // get_cog_load() and get_fatigue_level() return the newest result and
     // clear it, so a second call before the next result returns nothing.
@@ -477,7 +477,7 @@ public:
     /// Every cognitive-load prediction this session, oldest first.
     [[nodiscard]] std::vector<CogLoadResult> get_cog_load_prediction_history() const;
 
-    // ── Scene video, for trackers that provide it ──
+    // -- Scene video, for trackers that provide it --
 
     void start_realtime_video();
     void stop_realtime_video();
@@ -486,7 +486,7 @@ public:
     /// The next frame, or nothing if none is ready yet.
     [[nodiscard]] std::optional<VideoFrame> get_video_frame() const;
 
-    // ── Tuning ──
+    // -- Tuning --
 
     /// How long a session must run before get_mental_readiness() reports.
     void set_mental_readiness_min_session_seconds(double seconds);
@@ -498,7 +498,7 @@ public:
     /// Cognitive-load smoothing and confidence thresholds.
     void set_cog_load_model_settings(const CogLoadModelSettings& settings);
 
-    // ── Personalising the cognitive-load model ──
+    // -- Personalising the cognitive-load model --
     //
     // Times are in seconds from set_graph_start_time(); ground-truth points
     // carry their own Unix times.
@@ -519,7 +519,7 @@ public:
     /// Which models are loaded, and at what version.
     [[nodiscard]] std::vector<ModelInfo> get_model_info() const;
 
-    // ── Alerts ──
+    // -- Alerts --
 
     void set_alert_rules(const std::string& rules_json);
 
@@ -536,7 +536,7 @@ public:
     void disable_alert_sync();
     void refresh_alert_rules();
 
-    // ── Lease ──
+    // -- Lease --
 
     /// Swap in a renewed lease without restarting. Keeps the old lease and
     /// throws a LeaseVerificationError subclass if the new one is rejected.
