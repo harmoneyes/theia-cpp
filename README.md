@@ -28,12 +28,15 @@ harmoneyes_native_copy_runtime(my_app)
 
 - **A C++17 compiler** and **CMake 3.16+**.
 - **[Git LFS](https://git-lfs.com)**, to fetch the binaries.
-- **Platforms:** Linux x86_64 and Linux aarch64 (arm64), glibc 2.35 or later.
-  macOS arm64 (Apple Silicon) and Windows x86_64 are coming; CMake reports
-  clearly if your platform is not in this release.
+- **Platforms:** Linux x86_64 and aarch64 (arm64) with glibc 2.35 or later,
+  macOS 14 or later on Apple silicon, and Windows x86_64. CMake reports
+  clearly if your platform is not in a release.
 - **On Linux,** the system's libcurl 4 and OpenSSL 3. Ubuntu 22.04+ and
   Debian 12+ ship them; minimal and container images may not, so install them
   with `apt install libcurl4 libssl3`.
+- **On Windows,** the Microsoft Visual C++ Redistributable (2015-2022, x64).
+  Most machines already have it; otherwise it is a free download from
+  Microsoft.
 - **Device Lease:** a valid device lease is required to use the SDK — see below.
 
 ## Device Lease
