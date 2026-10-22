@@ -55,28 +55,32 @@ either).
 
 ### Recommended: let the SDK manage the lease
 
-Set these on each machine, or the `Options` fields of the same names
-(`lease_api_key_id`, `lease_api_key_secret`, `lease_file`):
+Set your API key on each machine, or the `Options` fields
+`lease_api_key_id` and `lease_api_key_secret`:
 
 ```bash
 export THEIA_API_KEY_ID="<your API key ID>"
 export THEIA_API_KEY_SECRET="<your API key secret>"
-export THEIA_LEASE_FILE="/var/lib/my-app/theia-lease"   # any path your app can write
 ```
 
 Nothing else is needed:
 
 - **On first start** the SDK obtains a lease for the machine from HarmonEyes
-  (HTTPS to `identity.harmoneyes.io`) and saves it in the lease file,
-  readable by your user only.
+  (HTTPS to `identity.harmoneyes.io`) and saves it in `.theia/lease` in your
+  home directory (`$HOME`, or `%USERPROFILE%` on Windows), readable by your
+  user only. To keep it elsewhere, set `THEIA_LEASE_FILE` or
+  `Options::lease_file`.
 - **From then on** it renews the lease in the background before it is due,
   retrying every 30 minutes while HarmonEyes cannot be reached. The machine
   runs offline until its lease expires.
 - **A machine offline for longer than its window** gets a new lease the next
   time it starts online.
 - **Each machine registers as** `het::machine_device_identifier()`, a hash of
-  its OS machine ID. Machines cloned from one disk image can share that ID;
-  give each its own `Options::lease_device_identifier` (a serial number, say).
+  its OS machine ID. Machines cloned from one disk image can share that ID,
+  and containers usually have none (an empty `/etc/machine-id`); give each its
+  own `Options::lease_device_identifier` (a serial number, say). In a
+  container, also keep the lease on a volume, or each new container starts
+  without one.
 - `sdk.lease_info()` reports when the lease expires and how the last renewal
   went.
 
@@ -333,7 +337,7 @@ All optional. Those marked — can only be set through the environment.
 | Variable | Used for | In code |
 |---|---|---|
 | `THEIA_LEASE` (or `THEIA_LICENSE_KEY`) | your device lease | `Options::lease_token` |
-| `THEIA_LEASE_FILE` | where the machine keeps its lease | `Options::lease_file` |
+| `THEIA_LEASE_FILE` | where the machine keeps its lease (with an API key, `.theia/lease` in your home directory unless set) | `Options::lease_file` |
 | `THEIA_API_KEY_ID`, `THEIA_API_KEY_SECRET` | your API key, for obtaining leases | `Options::lease_api_key_id`, `lease_api_key_secret` |
 | `THEIA_MODEL_CACHE_DIR` | where downloaded models are cached | `Options::model_cache_dir` |
 | `THEIA_MODEL_CDN_URL` | where models are downloaded from | — |

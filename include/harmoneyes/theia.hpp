@@ -32,7 +32,7 @@ namespace harmoneyes::theia {
 
 /// Version of these headers. version() is the native library you are
 /// running; include both when reporting a problem.
-inline constexpr std::string_view kVersion = "1.1.0";
+inline constexpr std::string_view kVersion = "1.1.1";
 
 /// Version of the native Theia library.
 [[nodiscard]] std::string version();
@@ -386,7 +386,8 @@ struct Options {
     /// Where this machine keeps its lease. The SDK starts from it (or from
     /// lease_token, whichever is newer) and replaces it, readable by you
     /// only, each time it renews or obtains a lease. Empty uses
-    /// $THEIA_LEASE_FILE.
+    /// $THEIA_LEASE_FILE, then, with an API key set, .theia/lease in your
+    /// home directory ($HOME, or %USERPROFILE% on Windows).
     std::string lease_file;
     /// Your API key. With it, a machine that has no lease, or whose lease
     /// expired while it was offline, obtains one by itself. Empty uses
@@ -395,7 +396,8 @@ struct Options {
     std::string lease_api_key_secret;
     /// This machine's name when it obtains a lease. Empty uses
     /// machine_device_identifier(). Set it (to a serial number, say) where
-    /// machines are cloned from one disk image and may share an OS machine ID.
+    /// machines are cloned from one disk image and may share an OS machine
+    /// ID, and in containers, which usually have none.
     std::string lease_device_identifier;
     /// The SDK renews its lease in the background before it is due to
     /// expire. Set this to turn that off; renew_lease() still works.
