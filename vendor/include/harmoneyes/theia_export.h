@@ -164,6 +164,22 @@ typedef struct {
 } ground_truth_point_t;
 
 typedef struct {
+    int has_lease;
+    const char* device_id;
+    const char* tenant_id;
+    const char* lease_id;
+    int64_t issued_at;
+    int64_t refresh_after;
+    int64_t warn_after;
+    int64_t expires_at;
+    int auto_renew;
+    int can_activate;
+    const char* lease_file;
+    int64_t last_renewal_attempt_unix_ms;
+    const char* last_renewal_error;
+} lease_info_t;
+
+typedef struct {
     double low_percentage;
     double moderate_percentage;
     double high_percentage;
@@ -200,6 +216,7 @@ typedef enum theia_error_code_t {
     THEIA_ERROR_LEASE_EXPIRED = 13,
     THEIA_ERROR_LEASE_DEVICE_MISMATCH = 14,
     THEIA_ERROR_LEASE_TENANT_MISMATCH = 15,
+    THEIA_ERROR_LEASE_RENEWAL = 16,
    
 } theia_error_code_t;
 
@@ -207,6 +224,7 @@ typedef void (*theia_log_callback_t)(const char* message, void* user_data);
 typedef void (*theia_cog_load_callback_t)(cog_load_result_t result, void* user_data);
 typedef void (*theia_fatigue_callback_t)(fatigue_result_t result, void* user_data);
 typedef void (*theia_alert_callback_t)(alert_event_t event, void* user_data);
+typedef void (*theia_lease_renewed_callback_t)(const char* lease_token, void* user_data);
 
 typedef struct {
     const void* reserved_0;
@@ -267,6 +285,14 @@ typedef struct {
     void (*reserved_41)(void);
     void* reserved_42;
     const void* reserved_43;
+    const char* lease_file;
+    const char* lease_api_key_id;
+    const char* lease_api_key_secret;
+    const char* lease_identity_url;
+    const char* lease_device_identifier;
+    int disable_lease_auto_renew;
+    theia_lease_renewed_callback_t lease_renewed_callback;
+    void* lease_renewed_callback_user_data;
 } options_t;
 
 theia_error_code_t theia_get_last_error_code(void);
@@ -311,6 +337,9 @@ int theia_sdk_enable_alert_sync(theia_sdk_t* sdk, const char* api_base_url, int 
 int theia_sdk_disable_alert_sync(theia_sdk_t* sdk);
 int theia_sdk_refresh_alert_rules(theia_sdk_t* sdk);
 int theia_sdk_set_lease_token(theia_sdk_t* sdk, const char* lease_token);
+int theia_sdk_renew_lease(theia_sdk_t* sdk);
+lease_info_t theia_sdk_get_lease_info(const theia_sdk_t* sdk);
+const char* theia_machine_device_identifier(void);
 
 #ifdef __cplusplus
 }
