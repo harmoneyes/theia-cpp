@@ -115,7 +115,7 @@ HARMONEYES_THEIA_SAME_FIELD(head_pose_tz);
 
 namespace harmoneyes::theia::detail {
 
-// ── Strings from the library ──
+// -- Strings from the library --
 //
 // Every `const char*` the library returns points into storage it reuses on
 // the next call, so each one is copied before it is returned.
@@ -125,7 +125,7 @@ namespace harmoneyes::theia::detail {
     return s ? std::string{s} : std::string{};
 }
 
-// ── Return codes ──
+// -- Return codes --
 //
 // Only creating the SDK and setting the lease record why they failed; every
 // other call reports failure with -1 alone. So the recorded reason is read
@@ -204,7 +204,23 @@ inline void check_succeeded(int rc, const char* context)
     if (rc != 1) { throw_opaque_error(context); }
 }
 
-// ── Conversions ──
+/// An environment variable's value, or empty when it is unset. The value is
+/// copied at once, so MSVC's warning about std::getenv (C4996) does not
+/// apply, and is silenced here rather than in every customer's build.
+[[nodiscard]] inline std::string getenv_copy(const char* name)
+{
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+    const char* value = std::getenv(name);
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    return value != nullptr ? std::string{value} : std::string{};
+}
+
+// -- Conversions --
 
 /// The platform name the library expects for a device.
 [[nodiscard]] inline const char* platform_string(Device device) noexcept
@@ -518,13 +534,8 @@ inline TheiaSDK::TheiaSDK(Options options)
 {
     Options& o = state_->options;
 
-    if (o.lease_token.empty()) {
-        if (const char* v = std::getenv("THEIA_LEASE"); v != nullptr && *v != '\0') {
-            o.lease_token = v;
-        } else if (const char* k = std::getenv("THEIA_LICENSE_KEY"); k != nullptr) {
-            o.lease_token = k;
-        }
-    }
+    if (o.lease_token.empty()) { o.lease_token = detail::getenv_copy("THEIA_LEASE"); }
+    if (o.lease_token.empty()) { o.lease_token = detail::getenv_copy("THEIA_LICENSE_KEY"); }
 
     ::options_t c{};
     c.platform = detail::platform_string(o.device);
