@@ -13,8 +13,10 @@
 ///     ...poll sdk.get_cog_load() and sdk.get_fatigue_level() once a second...
 ///     sdk.stop_processing();
 ///
-/// Call a TheiaSDK from one thread at a time.
+/// Call a TheiaSDK from one thread at a time. add_gaze_samples() is the one
+/// exception; see it.
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -230,6 +232,7 @@ enum class Device {
     PupilLabsNeon,  ///< Pupil Labs Neon, discovered on the network automatically
     Ganzin,         ///< Ganzin Sol; call set_ganzin_connection() first
     Webcam,         ///< A screen-based tracker you supply; see EyeTracker
+    Headset,        ///< A head-mounted tracker you supply, reporting gaze direction; see GazeSample
 };
 
 /// Marks a measurement as absent. A real number, not a NaN, so it compares
@@ -240,6 +243,9 @@ inline constexpr double NON_COMPUTE_VALUE = -8888.0;
 ///
 /// Every field starts at its "not measured" value, so fill in only what your
 /// tracker provides.
+///
+/// Device::Headset reads only timestamp_ns, the optical axes and the pupil
+/// diameters, and ignores the rest.
 struct GazeSample {
     std::int64_t timestamp_ns = 0;  ///< capture time, nanoseconds since the Unix epoch
 
@@ -265,7 +271,10 @@ struct GazeSample {
     float        right_eye_confidence = 1.0F;
     std::int32_t blink_id             = -1;    ///< which blink this sample belongs to; -1 = none
 
-    // 3D eye model: eyeball centres and optical-axis directions.
+    // 3D eye model: eyeball centres and optical-axis directions. For
+    // Device::Headset, an optical axis is the eye's gaze direction as a unit
+    // vector in the head's frame (+x right, +y up, +z forward), and (0, 0, 0)
+    // means that eye was not tracked.
     float eyeball_center_left_x  = 0.0F;
     float eyeball_center_left_y  = 0.0F;
     float eyeball_center_left_z  = 0.0F;
@@ -409,8 +418,8 @@ public:
 
     // ── Device connection ──
 
-    /// Use this gaze source. Required for Device::Webcam. It cannot be
-    /// changed while running.
+    /// Use this gaze source. Device::Webcam and Device::Headset need either
+    /// this or add_gaze_samples(). It cannot be changed while running.
     ///
     /// The tracker must outlive the SDK, or be dropped with clear_tracker()
     /// first. Declaring it *after* the SDK destroys it first and is the easy
@@ -432,6 +441,24 @@ public:
 
     /// Whether the gaze source stopped delivering samples.
     [[nodiscard]] bool has_connection_timeout() const;
+
+    // ── Gaze you collect yourself ──
+
+    /// Feed in gaze samples as your tracker delivers them: any number per
+    /// call, in time order. For Device::Webcam and Device::Headset, in place
+    /// of set_tracker() and start_realtime_data(): start a session, then call
+    /// this until stop_processing().
+    ///
+    /// It may run on another thread, such as your tracker's own callback,
+    /// while you call the get_* methods, but not alongside any other call,
+    /// itself included. Most calls return in microseconds; about once a
+    /// second one takes a few milliseconds to score the newest data, so keep
+    /// it off render and UI threads.
+    ///
+    /// Throws std::logic_error before start_new_session(), and while the SDK
+    /// is reading a device or a tracker of its own.
+    void add_gaze_samples(const GazeSample* samples, std::size_t count);
+    void add_gaze_samples(const std::vector<GazeSample>& samples);
 
     // ── Results ──
     //

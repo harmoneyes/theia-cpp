@@ -28,9 +28,9 @@ harmoneyes_native_copy_runtime(my_app)
 
 - **A C++17 compiler** and **CMake 3.16+**.
 - **[Git LFS](https://git-lfs.com)**, to fetch the binaries.
-- **Platforms:** Linux x86_64. Linux aarch64, macOS arm64 (Apple Silicon) and
-  Windows x86_64 are coming; CMake reports clearly if your platform is not in
-  this release.
+- **Platforms:** Linux x86_64 and Linux aarch64 (arm64), glibc 2.35 or later.
+  macOS arm64 (Apple Silicon) and Windows x86_64 are coming; CMake reports
+  clearly if your platform is not in this release.
 - **On Linux,** the system's libcurl 4 and OpenSSL 3. Ubuntu 22.04+ and
   Debian 12+ ship them; minimal and container images may not, so install them
   with `apt install libcurl4 libssl3`.
@@ -135,22 +135,85 @@ See [`examples/theia-ganzin-streaming.cpp`](examples/theia-ganzin-streaming.cpp)
 
 ### Your own tracker
 
-`Device::Webcam` takes gaze from a tracker you supply rather than one the SDK
-connects to itself. Implement `het::EyeTracker`, returning the samples
+Two devices take gaze from a tracker you supply, rather than one the SDK
+connects to itself:
+
+| Device | For |
+|---|---|
+| `Device::Webcam` | screen-based trackers, about 30 samples a second |
+| `Device::Headset` | head-mounted trackers that report where each eye points |
+
+There are two ways to hand it the samples.
+
+**Push them as they arrive** with `add_gaze_samples()`. This is the simpler
+one when your tracker calls you back with each frame:
+
+```cpp
+het::TheiaSDK sdk{het::Device::Headset};
+sdk.start_new_session(session_uuid);
+
+// in your tracker's frame callback:
+sdk.add_gaze_samples({sample});   // or a std::vector of several, in time order
+
+// when the recording ends:
+sdk.stop_processing();
+```
+
+There is no `start_realtime_data()` call. `add_gaze_samples()` may run on
+another thread, such as that callback, while you call the `get_*` methods, but
+not alongside any other call, itself included. Most calls return in
+microseconds; about once a second one takes a few milliseconds to score the
+newest data, so keep it off render and UI threads.
+
+**Or let the SDK poll you:** implement `het::EyeTracker`, returning the samples
 gathered since the last call from `get_buffered_data()`, and hand it to
 `set_tracker()` before starting the stream.
 
-It runs the pipeline tuned for webcam gaze: screen-based, about 30 samples a
-second. Results from trackers that differ much from that have not been
-validated, so contact support@harmoneyes.com before relying on them.
-
 ```cpp
 MyTracker     tracker;        // implements het::EyeTracker; declare it FIRST
-het::TheiaSDK sdk{het::Device::Webcam};
+het::TheiaSDK sdk{het::Device::Headset};
 sdk.set_tracker(tracker);
 sdk.start_new_session(session_uuid);
 sdk.start_realtime_data();    // calls tracker.start(), then polls it
 ```
+
+`start_realtime_data()` calls `start()`, then polls `get_buffered_data()` and
+`is_connected()` on the SDK's own thread; `stop_processing()` stops polling and
+calls `close()`. The SDK never calls two of these at once, so your tracker can
+share state between them without locking. Samples you collect on another
+thread, such as your tracker's own callback, do need a lock.
+
+**Lifetime:** the tracker must outlive the SDK, and cannot be swapped while
+running. Declaring it *after* the SDK destroys it first, which is the easy way
+to get this wrong, so declare it first as above. If it cannot outlive the SDK,
+call `clear_tracker()` before destroying it.
+
+#### Head-mounted: `Device::Headset`
+
+`Device::Headset` reads three things from each `het::GazeSample` and ignores
+the rest:
+
+| Field | Set it to |
+|---|---|
+| `timestamp_ns` | the capture time, in nanoseconds since the Unix epoch |
+| `optical_axis_left_x/y/z`, `optical_axis_right_x/y/z` | each eye's gaze direction, as a unit vector in the head's frame: +x right, +y up, +z forward. Leave an eye at `(0, 0, 0)` when it was not tracked; one eye is enough. |
+| `pupil_diameter_left`, `pupil_diameter_right` | the pupil diameters, in millimetres |
+
+- **Check the y axis.** Many eye cameras count +y downwards; negate it if
+  yours does.
+- **Send pupil diameters if you can.** Blinks are detected from the pupil
+  signal. Without it the SDK finds none, and cognitive load reads Low
+  throughout.
+- **It is tuned for Tobii Pro Glasses 3,** at 50 samples a second. Results
+  from other headsets have not been validated, so contact
+  support@harmoneyes.com before relying on them.
+
+#### Screen-based: `Device::Webcam`
+
+Set `gaze_x_norm` and `gaze_y_norm` on every sample: the angular features are
+computed from those, not from pixels. Results from trackers that differ much
+from about 30 samples a second have not been validated, so contact
+support@harmoneyes.com before relying on them.
 
 A default-constructed `het::GazeSample` uses `NON_COMPUTE_VALUE` for the
 optional measurements (pupil, eyelid, IMU, normalised gaze, screen and head
@@ -159,19 +222,6 @@ eye positions default to `0.0`, and `left_eye_validity` / `right_eye_validity`
 default to `1` (valid) with `left_eye_status` / `right_eye_status` at `2`
 (open). Set those yourself on any sample where your tracker lost the eye,
 otherwise a dropped frame is fed in as a good one.
-
-Screen-based trackers must set `gaze_x_norm` and `gaze_y_norm`: the angular
-features are computed from those, not from pixels.
-
-`start_realtime_data()` calls `start()`, then polls `get_buffered_data()` and
-`is_connected()` on the SDK's own thread; `stop_processing()` stops polling and
-calls `close()`. The SDK never calls two of these at once, so your tracker can
-share state between them without locking.
-
-**Lifetime:** the tracker must outlive the SDK, and cannot be swapped while
-running. Declaring it *after* the SDK destroys it first, which is the easy way
-to get this wrong, so declare it first as above. If it cannot outlive the SDK,
-call `clear_tracker()` before destroying it.
 
 ## Coming from the Python SDK
 

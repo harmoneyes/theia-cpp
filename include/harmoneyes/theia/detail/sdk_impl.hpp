@@ -212,6 +212,10 @@ inline void check_succeeded(int rc, const char* context)
     switch (device) {
         case Device::Ganzin: return "Ganzin";
         case Device::Webcam: return "Webcam";
+        // The library's Tobii Pro Glasses 3 profile, which reads gaze direction
+        // and pupil size only. With a tracker supplied, it never connects to
+        // glasses itself.
+        case Device::Headset: return "TobiiG3";
         case Device::PupilLabsNeon:
             break;
     }
@@ -595,10 +599,11 @@ inline void TheiaSDK::start_realtime_data()
             throw;
         }
     } else {
-        if (s.options.device == Device::Webcam) {
+        if (s.options.device == Device::Webcam || s.options.device == Device::Headset) {
             throw std::logic_error(
-                "start_realtime_data: Device::Webcam needs a gaze source; call "
-                "set_tracker() with your EyeTracker first");
+                "start_realtime_data: this device needs a gaze source; call "
+                "set_tracker() with your EyeTracker first, or skip "
+                "start_realtime_data() and call add_gaze_samples()");
         }
         detail::check(::theia_sdk_start_data_streaming(h), "start_realtime_data");
         s.native_streaming = true;
@@ -643,6 +648,31 @@ inline bool TheiaSDK::is_running() const
 {
     (void)handle();
     return state_->running;
+}
+
+inline void TheiaSDK::add_gaze_samples(const GazeSample* samples, std::size_t count)
+{
+    ::theia_sdk_t* h = handle();
+    const State&   s = *state_;
+    if (!s.session_open) {
+        throw std::logic_error("add_gaze_samples: no session; call start_new_session() first");
+    }
+    if (s.native_streaming || s.feeding) {
+        throw std::logic_error(
+            "add_gaze_samples: the SDK is already reading gaze from start_realtime_data()");
+    }
+    if (count == 0) { return; }
+    if (samples == nullptr) { throw std::invalid_argument("add_gaze_samples: samples is null"); }
+    // The library copies each sample and never writes through this pointer,
+    // despite its non-const signature.
+    detail::check(::theia_sdk_add_gaze_samples(
+                      h, const_cast<::gaze_sample_t*>(detail::as_c_samples(samples)), count),
+                  "add_gaze_samples");
+}
+
+inline void TheiaSDK::add_gaze_samples(const std::vector<GazeSample>& samples)
+{
+    add_gaze_samples(samples.data(), samples.size());
 }
 
 inline void TheiaSDK::set_tracker(EyeTracker& tracker)
