@@ -32,7 +32,7 @@ namespace harmoneyes::theia {
 
 /// Version of these headers. version() is the native library you are
 /// running; include both when reporting a problem.
-inline constexpr std::string_view kVersion = "0.1.0";
+inline constexpr std::string_view kVersion = "1.0.0";
 
 /// Version of the native Theia library.
 [[nodiscard]] std::string version();
@@ -231,7 +231,7 @@ using AlertCallback = std::function<void(const AlertEvent&)>;
 enum class Device {
     PupilLabsNeon,  ///< Pupil Labs Neon, discovered on the network automatically
     Ganzin,         ///< Ganzin Sol; call set_ganzin_connection() first
-    Webcam,         ///< A screen-based tracker you supply; see EyeTracker
+    Screen,         ///< A screen-based tracker you supply; see EyeTracker
     Headset,        ///< A head-mounted tracker you supply, reporting gaze direction; see GazeSample
 };
 
@@ -418,7 +418,7 @@ public:
 
     // -- Device connection --
 
-    /// Use this gaze source. Device::Webcam and Device::Headset need either
+    /// Use this gaze source. Device::Screen and Device::Headset need either
     /// this or add_gaze_samples(). It cannot be changed while running.
     ///
     /// The tracker must outlive the SDK, or be dropped with clear_tracker()
@@ -437,15 +437,19 @@ public:
     /// Where the Ganzin Sol is. Call before start_realtime_data().
     void set_ganzin_connection(const std::string& ip, int port = 8080, int rtsp_port = 8086);
 
+    /// Whether the device, or the tracker from set_tracker(), is still
+    /// connected. Samples you push with add_gaze_samples() have no connection
+    /// for it to report on.
     [[nodiscard]] bool is_connected() const;
 
-    /// Whether the gaze source stopped delivering samples.
+    /// Whether the device or tracker stopped delivering samples. Like
+    /// is_connected(), it does not cover add_gaze_samples().
     [[nodiscard]] bool has_connection_timeout() const;
 
     // -- Gaze you collect yourself --
 
     /// Feed in gaze samples as your tracker delivers them: any number per
-    /// call, in time order. For Device::Webcam and Device::Headset, in place
+    /// call, in time order. For Device::Screen and Device::Headset, in place
     /// of set_tracker() and start_realtime_data(): start a session, then call
     /// this until stop_processing().
     ///
