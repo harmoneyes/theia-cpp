@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  # vendor/ is written by theia-native's release workflow (its
+  # harmoneyes-native job), never by hand. That job records a SHA-256 for
+  # every file it vendors, so a file edited, added or swapped afterwards fails
+  # here. The second step catches a release that was built wrong to begin with.
+  vendored-release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Every vendored file matches the release manifest
+        run: |
+          set -euo pipefail
+          cd vendor
+          if [ ! -s SHA256SUMS ]; then
+            echo "::error file=vendor/SHA256SUMS::missing. vendor/ is written by theia-native's release workflow, not by hand"
+            exit 1
+          fi
+          if ! sha256sum --strict --check --quiet SHA256SUMS; then
+            echo "::error file=vendor/SHA256SUMS::vendored files differ from what the release wrote; vendor/ must not be edited by hand"
+            exit 1
+          fi
+          unlisted="$(comm -23 \
+            <(find . -type f ! -name SHA256SUMS | sed 's|^\./||' | LC_ALL=C sort) \
+            <(sed -E 's/^[0-9a-f]{64} [ *]//' SHA256SUMS | LC_ALL=C sort))"
+          if [ -n "${unlisted}" ]; then
+            echo "::error::files in vendor/ that the release did not write:"
+            echo "${unlisted}"
+            exit 1
+          fi
+
+      - name: The vendored files are a release build
+        run: |
+          set -euo pipefail
+          version="$(cat vendor/VERSION)"
+          if [[ "${version}" == *local* ]]; then
+            echo "::error file=vendor/VERSION::${version} is a local build"
+            exit 1
+          fi
+          for lib in vendor/*/libtheia.so.0 vendor/*/libtheia.dylib vendor/*/theia.dll; do
+            [ -e "${lib}" ] || continue
+            if grep -aq -- "PRIVATE KEY-----" "${lib}"; then
+              echo "::error file=${lib}::contains a private key"
+              exit 1
+            fi
+          done
+          for lib in vendor/linux-*/libtheia.so.0; do
+            [ -e "${lib}" ] || continue
+            if ! file "${lib}" | grep -q ", stripped"; then
+              echo "::error file=${lib}::is not stripped"
+              exit 1
+            fi
+          done
+
+  # Builds the examples the way a customer would (through find_package), and
+  # checks each library refuses to start without a device lease. Add macOS and
+  # Windows runners as their libraries are vendored. GitHub's arm64 runners
+  # are free for public repositories; a private one needs them enabled.
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-x86_64
+          - runner: ubuntu-24.04-arm
+            platform: linux-aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Build the examples
+        run: |
+          cmake -S . -B build -DCMAKE_CXX_FLAGS="-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror"
+          cmake --build build --parallel
+
+      - name: The SDK refuses to start without a device lease
+        run: |
+          lib="vendor/${{ matrix.platform }}/libtheia.so.0"
+          g++ -std=c++17 -Iinclude -Ivendor/include .github/ci/requires_lease.cpp \
+              "${lib}" -Wl,-rpath,"$PWD/vendor/${{ matrix.platform }}" -o requires_lease
+          env -u THEIA_LEASE -u THEIA_LICENSE_KEY ./requires_lease
