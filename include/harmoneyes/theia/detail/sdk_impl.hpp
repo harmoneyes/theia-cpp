@@ -227,7 +227,8 @@ inline void check_succeeded(int rc, const char* context)
 {
     switch (device) {
         case Device::Ganzin: return "Ganzin";
-        case Device::Webcam: return "Webcam";
+        // The library's webcam (Tobii Nexus) profile, tuned for screen-based gaze.
+        case Device::Screen: return "Webcam";
         // The library's Tobii Pro Glasses 3 profile, which reads gaze direction
         // and pupil size only. With a tracker supplied, it never connects to
         // glasses itself.
@@ -610,7 +611,7 @@ inline void TheiaSDK::start_realtime_data()
             throw;
         }
     } else {
-        if (s.options.device == Device::Webcam || s.options.device == Device::Headset) {
+        if (s.options.device == Device::Screen || s.options.device == Device::Headset) {
             throw std::logic_error(
                 "start_realtime_data: this device needs a gaze source; call "
                 "set_tracker() with your EyeTracker first, or skip "

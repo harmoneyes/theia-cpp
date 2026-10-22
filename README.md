@@ -7,15 +7,19 @@ C++ SDK for real-time eye tracking analysis, cognitive load prediction, and fati
 
 ## Installation
 
+Each release is a tag; the list is on the repository's Releases page. Clone
+the release you want rather than `main`, which moves between releases:
+
 ```bash
 git lfs install            # once per machine; the binaries are stored with Git LFS
-git clone https://github.com/harmoneyes/HarmonEyesNative.git
+git clone --branch v1.0.0 https://github.com/harmoneyes/HarmonEyesNative.git
 ```
 
-There is no build or install step: point CMake at the clone.
+There is no build or install step: point CMake at the clone. The version in
+`find_package` is optional; `1.0` accepts any 1.x release.
 
 ```cmake
-find_package(HarmonEyesNative REQUIRED PATHS /path/to/HarmonEyesNative)
+find_package(HarmonEyesNative 1.0 REQUIRED PATHS /path/to/HarmonEyesNative)
 
 add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE HarmonEyesNative::theia)
@@ -48,7 +52,9 @@ verified entirely offline, so a customer machine never calls home to log in.
 redirect that.)
 
 **Getting your first lease:** contact support@harmoneyes.com. HarmonEyes staff
-issues a lease for your device and sends you the token.
+issues a lease for your device and sends you the token. Leases are per
+machine: each needs its own, and a new lease for a machine replaces the one
+it had.
 
 **Using it:** set `THEIA_LEASE` in your environment and the SDK picks it up, or
 set `Options::lease_token` in code. `THEIA_LICENSE_KEY` is accepted too.
@@ -143,7 +149,7 @@ connects to itself:
 
 | Device | For |
 |---|---|
-| `Device::Webcam` | screen-based trackers, about 30 samples a second |
+| `Device::Screen` | screen-based trackers, about 30 samples a second |
 | `Device::Headset` | head-mounted trackers that report where each eye points |
 
 There are two ways to hand it the samples.
@@ -166,7 +172,9 @@ There is no `start_realtime_data()` call. `add_gaze_samples()` may run on
 another thread, such as that callback, while you call the `get_*` methods, but
 not alongside any other call, itself included. Most calls return in
 microseconds; about once a second one takes a few milliseconds to score the
-newest data, so keep it off render and UI threads.
+newest data, so keep it off render and UI threads. `is_connected()` and
+`has_connection_timeout()` report on devices and trackers the SDK reads
+itself, so they say nothing about samples you push.
 
 **Or let the SDK poll you:** implement `het::EyeTracker`, returning the samples
 gathered since the last call from `get_buffered_data()`, and hand it to
@@ -211,7 +219,7 @@ the rest:
   from other headsets have not been validated, so contact
   support@harmoneyes.com before relying on them.
 
-#### Screen-based: `Device::Webcam`
+#### Screen-based: `Device::Screen`
 
 Set `gaze_x_norm` and `gaze_y_norm` on every sample: the angular features are
 computed from those, not from pixels. Results from trackers that differ much
@@ -242,8 +250,9 @@ The method names are the same. The differences are the ones C++ makes natural:
 
 **Some features are Python-only for now:** the webcam
 (`NexusWebcamTracker`), and recorded data: `predict_cog_load_batch()`,
-`predict_fatigue_batch()` and `process_tobii_g3_data()` (Tobii Pro Glasses 3). Calls the Python SDK keeps only for older code,
-such as `set_window_size()` and `set_profile()`, are left out.
+`predict_fatigue_batch()` and `process_tobii_g3_data()` (Tobii Pro Glasses
+3). Calls the Python SDK keeps only for older code, such as
+`set_window_size()` and `set_profile()`, are left out.
 
 ## Tuning and personalisation
 
@@ -282,6 +291,26 @@ All optional. Those marked — can only be set through the environment.
 | `THEIA_DEVICE_API_URL` | the HarmonEyes API used by `enable_alert_sync()` | its `api_base_url` |
 | `THEIA_ALERT_CACHE_DIR` | where synced alert rules are cached | — |
 
+## Shipping your application
+
+`harmoneyes_native_copy_runtime()` sets up your build tree. To ship, install
+the library beside your executable; the same call has already pointed the
+executable there (an `$ORIGIN` or `@loader_path` rpath on Linux and macOS):
+
+```cmake
+install(TARGETS my_app RUNTIME DESTINATION bin)
+install(FILES $<TARGET_FILE:HarmonEyesNative::theia> DESTINATION bin)
+```
+
+- **Linux:** the target machine needs libcurl 4 and OpenSSL 3 (see
+  [Requirements](#requirements)).
+- **macOS:** `libtheia.dylib` is signed ad hoc. When you sign and notarize
+  your app, sign the dylib with your Developer ID along with it, or
+  Gatekeeper rejects the app.
+- **Windows:** ship `theia.dll` beside your `.exe`; `theia.lib` is only for
+  linking. The target machine needs the Visual C++ Redistributable
+  (2015-2022, x64), which you can bundle Microsoft's installer for.
+
 ## License & Usage
 
 This software is proprietary and requires a valid device lease to operate (see
@@ -289,7 +318,7 @@ This software is proprietary and requires a valid device lease to operate (see
 distributed but will not function without one.
 
 - **Copyright**: © RightEye LLC / HarmonEyes
-- **License Type**: Proprietary / Commercial
+- **License Type**: Proprietary / Commercial; see [LICENSE](LICENSE)
 - **Obtaining a Device Lease**: contact sales@harmoneyes.com
 
 ## Support

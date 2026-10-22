@@ -1,0 +1,39 @@
+name: Release
+
+# Each theia-native release arrives as a PR that rewrites vendor/, VERSION
+# included. Once CI passes on main with a VERSION that has no tag yet, this
+# tags that commit and publishes a GitHub Release, so customers clone a fixed
+# release rather than main.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Tag and publish the release, if this VERSION has none yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          tag="$(cat vendor/VERSION)"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" > /dev/null; then
+            echo "${tag} is already released"
+            exit 0
+          fi
+          prerelease=()
+          if [[ "${tag}" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "${tag}" --target "${SHA}" --title "${tag}" --generate-notes "${prerelease[@]}" \
+            --notes "Install: \`git clone --branch ${tag} https://github.com/harmoneyes/HarmonEyesNative.git\` (with Git LFS installed)."
