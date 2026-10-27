@@ -32,7 +32,7 @@ namespace harmoneyes::theia {
 
 /// Version of these headers. version() is the native library you are
 /// running; include both when reporting a problem.
-inline constexpr std::string_view kVersion = "2.0.0";
+inline constexpr std::string_view kVersion = "2.1.0";
 
 /// Version of the native Theia library.
 [[nodiscard]] std::string version();
@@ -243,6 +243,7 @@ enum class Device {
     Ganzin,         ///< Ganzin Sol; call set_ganzin_connection() first
     Screen,         ///< A screen-based tracker you supply; see EyeTracker
     Headset,        ///< A head-mounted tracker you supply, reporting gaze direction; see GazeSample
+    Stasis,         ///< A Stasis head-mounted eye camera, whose gaze you push; see GazeSample
 };
 
 /// Marks a measurement as absent. A real number, not a NaN, so it compares
@@ -256,6 +257,13 @@ inline constexpr double NON_COMPUTE_VALUE = -8888.0;
 ///
 /// Device::Headset reads only timestamp_ns, the optical axes and the pupil
 /// diameters, and ignores the rest.
+///
+/// Device::Stasis reads timestamp_ns, the tracked eye's optical axis and its
+/// eye status, plus its pupil diameter if you have one. The optical axis is
+/// the camera's gaze vector as it reports it: +x right, +y DOWN, +z forward;
+/// the SDK converts it. Set the eye status to 2 (open) when the camera found
+/// the pupil and 0 (lost) when it didn't: blinks are read from those losses,
+/// or from gaps in gaze if you leave the status alone.
 struct GazeSample {
     std::int64_t timestamp_ns = 0;  ///< capture time, nanoseconds since the Unix epoch
 
@@ -469,8 +477,8 @@ public:
 
     // -- Device connection --
 
-    /// Use this gaze source. Device::Screen and Device::Headset need either
-    /// this or add_gaze_samples(). It cannot be changed while running.
+    /// Use this gaze source. Device::Screen, Device::Headset and
+    /// Device::Stasis need either this or add_gaze_samples(). It cannot be changed while running.
     ///
     /// The tracker must outlive the SDK, or be dropped with clear_tracker()
     /// first. Declaring it *after* the SDK destroys it first and is the easy
@@ -500,9 +508,9 @@ public:
     // -- Gaze you collect yourself --
 
     /// Feed in gaze samples as your tracker delivers them: any number per
-    /// call, in time order. For Device::Screen and Device::Headset, in place
-    /// of set_tracker() and start_realtime_data(): start a session, then call
-    /// this until stop_processing().
+    /// call, in time order. For Device::Screen, Device::Headset and
+    /// Device::Stasis, in place of set_tracker() and start_realtime_data():
+    /// start a session, then call this until stop_processing().
     ///
     /// It may run on another thread, such as your tracker's own callback,
     /// while you call the get_* methods, but not alongside any other call,

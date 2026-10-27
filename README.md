@@ -12,7 +12,7 @@ the release you want rather than `main`, which moves between releases:
 
 ```bash
 git lfs install            # once per machine; the binaries are stored with Git LFS
-git clone --branch v2.0.0 https://github.com/harmoneyes/HarmonEyesNative.git
+git clone --branch v2.1.0 https://github.com/harmoneyes/HarmonEyesNative.git
 ```
 
 There is no build or install step: point CMake at the clone. The version in
@@ -20,7 +20,7 @@ There is no build or install step: point CMake at the clone. The version in
 same major version, so `1.1` accepts 1.1.1 and 1.4 but not 2.0.
 
 ```cmake
-find_package(HarmonEyesNative 2.0 REQUIRED PATHS /path/to/HarmonEyesNative)
+find_package(HarmonEyesNative 2.1 REQUIRED PATHS /path/to/HarmonEyesNative)
 
 add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE HarmonEyesNative::theia)
@@ -230,6 +230,7 @@ connects to itself:
 |---|---|
 | `Device::Screen` | screen-based trackers, about 30 samples a second |
 | `Device::Headset` | head-mounted trackers that report where each eye points |
+| `Device::Stasis` | the Stasis head-mounted eye camera |
 
 There are two ways to hand it the samples.
 
@@ -297,6 +298,24 @@ the rest:
 - **It is tuned for Tobii Pro Glasses 3,** at 50 samples a second. Results
   from other headsets have not been validated, so contact
   support@harmoneyes.com before relying on them.
+
+#### Stasis eye camera: `Device::Stasis`
+
+`Device::Stasis` reads these from each `het::GazeSample`:
+
+| Field | Set it to |
+|---|---|
+| `timestamp_ns` | the capture time, in nanoseconds since the Unix epoch |
+| `optical_axis_left_x/y/z` (`_right_` for a right-eye camera) | the camera's gaze vector as it reports it: +x right, +y **down**, +z forward. Leave it at `(0, 0, 0)` when there is no gaze. |
+| `left_eye_status` (`right_eye_status` for a right-eye camera) | `2` when the camera found the pupil, `0` when it didn't |
+
+- **Blinks** are read from the frames where the pupil was lost. Leave the
+  status alone and they come from gaps in gaze instead, which also counts
+  tracking dropouts as blinks.
+- **Pupil diameter** is optional: `pupil_diameter_left` in millimetres, if your
+  camera measures it.
+- **The settings are provisional,** borrowed from head-mounted Tobii glasses,
+  and results have not been validated on Stasis recordings yet.
 
 #### Screen-based: `Device::Screen`
 
