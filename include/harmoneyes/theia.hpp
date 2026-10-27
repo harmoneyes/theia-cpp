@@ -32,7 +32,7 @@ namespace harmoneyes::theia {
 
 /// Version of these headers. version() is the native library you are
 /// running; include both when reporting a problem.
-inline constexpr std::string_view kVersion = "1.1.1";
+inline constexpr std::string_view kVersion = "2.0.0";
 
 /// Version of the native Theia library.
 [[nodiscard]] std::string version();

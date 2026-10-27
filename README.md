@@ -12,7 +12,7 @@ the release you want rather than `main`, which moves between releases:
 
 ```bash
 git lfs install            # once per machine; the binaries are stored with Git LFS
-git clone --branch v1.1.1 https://github.com/harmoneyes/HarmonEyesNative.git
+git clone --branch v2.0.0 https://github.com/harmoneyes/HarmonEyesNative.git
 ```
 
 There is no build or install step: point CMake at the clone. The version in
@@ -20,7 +20,7 @@ There is no build or install step: point CMake at the clone. The version in
 same major version, so `1.1` accepts 1.1.1 and 1.4 but not 2.0.
 
 ```cmake
-find_package(HarmonEyesNative 1.1 REQUIRED PATHS /path/to/HarmonEyesNative)
+find_package(HarmonEyesNative 2.0 REQUIRED PATHS /path/to/HarmonEyesNative)
 
 add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE HarmonEyesNative::theia)
@@ -28,6 +28,16 @@ target_link_libraries(my_app PRIVATE HarmonEyesNative::theia)
 # Puts the shared library next to your executable.
 harmoneyes_native_copy_runtime(my_app)
 ```
+
+### Upgrading from 1.x
+
+2.0 changes no code: the headers and the API are the same as 1.1.1. Change
+the version in `find_package` from `1.1` to `2.0`, because CMake accepts only
+a release with the same major version. The major version moved because the
+Python SDK released alongside it has breaking changes.
+
+The library now exports only the C functions declared in
+`harmoneyes/theia_export.h`. Nothing documented called anything else.
 
 ## Requirements
 
