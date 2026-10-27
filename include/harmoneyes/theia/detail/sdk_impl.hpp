@@ -241,6 +241,9 @@ inline void check_succeeded(int rc, const char* context)
         // and pupil size only. With a tracker supplied, it never connects to
         // glasses itself.
         case Device::Headset: return "TobiiG3";
+        // Its own profile: one eye at 60 Hz, gaze +y down, blinks from pupil
+        // detection or gaze gaps when there is no pupil size.
+        case Device::Stasis: return "Stasis";
         case Device::PupilLabsNeon:
             break;
     }
@@ -638,7 +641,8 @@ inline void TheiaSDK::start_realtime_data()
             throw;
         }
     } else {
-        if (s.options.device == Device::Screen || s.options.device == Device::Headset) {
+        if (s.options.device == Device::Screen || s.options.device == Device::Headset ||
+            s.options.device == Device::Stasis) {
             throw std::logic_error(
                 "start_realtime_data: this device needs a gaze source; call "
                 "set_tracker() with your EyeTracker first, or skip "
