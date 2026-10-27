@@ -16,7 +16,8 @@ git clone --branch v1.1.1 https://github.com/harmoneyes/HarmonEyesNative.git
 ```
 
 There is no build or install step: point CMake at the clone. The version in
-`find_package` is optional; `1.1` accepts 1.1 or any later 1.x release.
+`find_package` is optional. It accepts that release or any later one with the
+same major version, so `1.1` accepts 1.1.1 and 1.4 but not 2.0.
 
 ```cmake
 find_package(HarmonEyesNative 1.1 REQUIRED PATHS /path/to/HarmonEyesNative)
