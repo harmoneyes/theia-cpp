@@ -16,7 +16,8 @@ git clone --branch v2.0.0 https://github.com/harmoneyes/HarmonEyesNative.git
 ```
 
 There is no build or install step: point CMake at the clone. The version in
-`find_package` is optional; `1.0` accepts any 1.x release.
+`find_package` is optional. It accepts that release or any later one with the
+same major version, so `1.1` accepts 1.1.1 and 1.4 but not 2.0.
 
 ```cmake
 find_package(HarmonEyesNative 2.0 REQUIRED PATHS /path/to/HarmonEyesNative)
@@ -28,6 +29,16 @@ target_link_libraries(my_app PRIVATE HarmonEyesNative::theia)
 harmoneyes_native_copy_runtime(my_app)
 ```
 
+### Upgrading from 1.x
+
+2.0 changes no code: the headers and the API are the same as 1.1.1. Change
+the version in `find_package` from `1.1` to `2.0`, because CMake accepts only
+a release with the same major version. The major version moved because the
+Python SDK released alongside it has breaking changes.
+
+The library now exports only the C functions declared in
+`harmoneyes/theia_export.h`. Nothing documented called anything else.
+
 ## Requirements
 
 - **A C++17 compiler** and **CMake 3.16+**.
@@ -35,13 +46,19 @@ harmoneyes_native_copy_runtime(my_app)
 - **Platforms:** Linux x86_64 and aarch64 (arm64) with glibc 2.35 or later,
   macOS 14 or later on Apple silicon, and Windows x86_64. CMake reports
   clearly if your platform is not in a release.
-- **On Linux,** the system's libcurl 4 and OpenSSL 3. Ubuntu 22.04+ and
-  Debian 12+ ship them; minimal and container images may not, so install them
-  with `apt install libcurl4 libssl3`.
+- **On Linux,** the system's libcurl 4, OpenSSL 3 and CA certificates.
+  Ubuntu 22.04+ and Debian 12+ ship them; minimal and container images may
+  not, so install them with `apt install libcurl4 libssl3 ca-certificates`.
+  Without the certificates, the SDK cannot reach HarmonEyes.
 - **On Windows,** the Microsoft Visual C++ Redistributable (2015-2022, x64).
   Most machines already have it; otherwise it is a free download from
   Microsoft.
-- **Device Lease:** a valid device lease is required to use the SDK — see below.
+- **Your HarmonEyes API key,** which gives each machine its device lease; see
+  [Device Lease](#device-lease).
+- **A correct clock.** Leases are checked against the machine's clock, so keep
+  it set by NTP. A clock that runs ahead makes a valid lease look expired, and
+  the SDK will not start; one that runs behind (a board that boots without a
+  battery-backed clock, say) holds off renewal until it is corrected.
 
 ## Device Lease
 
@@ -122,6 +139,8 @@ obtained elsewhere with `sdk.set_lease_token(lease)`.
 
 ## Quick start
 
+With your API key set (see [Device Lease](#device-lease)):
+
 ```cpp
 #include <harmoneyes/theia.hpp>
 
@@ -131,9 +150,17 @@ het::TheiaSDK sdk{het::Device::PupilLabsNeon};
 sdk.start_new_session(session_uuid);
 sdk.start_realtime_data();
 
-// once a second:
-if (auto cog = sdk.get_cog_load())          { std::cout << cog->label << '\n'; }  // Low / Moderate / High
-if (auto fatigue = sdk.get_fatigue_level()) { std::cout << fatigue->label << '\n'; }
+// once a second, every result on one line:
+if (auto cog = sdk.get_cog_load())          { cog_load = cog->label; }      // Low / Moderate / High
+if (auto fatigue = sdk.get_fatigue_level()) { fatigue_level = fatigue->label; }
+const auto attention = sdk.get_attention_style();
+const auto readiness = sdk.get_mental_readiness();
+std::cout << "Cognitive load: " << cog_load << " | Fatigue: " << fatigue_level
+          << " | Attention: " << (attention ? attention->label : "not yet")
+          << " | Mental readiness: "
+          << (readiness ? (readiness->low_percentage + readiness->moderate_percentage >= 50.0 ? "High" : "Low")
+                        : "not yet")
+          << '\n';
 
 sdk.stop_processing();
 ```
@@ -153,11 +180,12 @@ one thread at a time. Destroying it stops everything.
 | `get_cog_load()` | `level` (0=Low, 1=Moderate, 2=High), `label`, `confidence` | about once a second, after a ~30 s warmup |
 | `get_fatigue_level()` | `level` (0=Alert, 1=Somewhat Fatigued, 2=Fatigued), `label`, `confidence`, time-to-transition | about every 2 minutes |
 | `get_attention_style()` | `level` (1=Narrow … 5=Broad), `label` | continuously |
-| `get_mental_readiness(elapsed_seconds)` | `low_percentage`, `moderate_percentage`, `high_percentage` | continuously |
+| `get_mental_readiness(elapsed_seconds)` | `low_percentage`, `moderate_percentage`, `high_percentage` of the session's cognitive load. Readiness is **High** while `low_percentage + moderate_percentage` is at least 50, **Low** otherwise. | continuously |
 
 Each returns an empty `std::optional` until a result is available.
 `get_cog_load()` and `get_fatigue_level()` return the newest result and clear
-it, so poll them about once a second. To receive every result instead, set
+it, so poll them about once a second and keep the last one, as the quick start
+does. To receive every result instead, set
 `Options::on_cog_load` and `Options::on_fatigue`; those callbacks run on the
 SDK's own threads.
 
@@ -355,8 +383,13 @@ install(TARGETS my_app RUNTIME DESTINATION bin)
 install(FILES $<TARGET_FILE:HarmonEyesNative::theia> DESTINATION bin)
 ```
 
-- **Linux:** the target machine needs libcurl 4 and OpenSSL 3 (see
-  [Requirements](#requirements)).
+- **Linux:** the target machine needs libcurl 4, OpenSSL 3 and CA
+  certificates (see [Requirements](#requirements)).
+- **Services:** an app running as a service (systemd, a Windows service) may
+  have no home directory, or none it can write, and the SDK keeps its lease
+  and models there. Set `THEIA_LEASE_FILE` and `THEIA_MODEL_CACHE_DIR` to
+  paths the service can write, and give it the API key the same way as an
+  app.
 - **macOS:** `libtheia.dylib` is signed ad hoc. When you sign and notarize
   your app, sign the dylib with your Developer ID along with it, or
   Gatekeeper rejects the app.
@@ -372,7 +405,7 @@ distributed but will not function without one.
 
 - **Copyright**: © RightEye LLC / HarmonEyes
 - **License Type**: Proprietary / Commercial; see [LICENSE](LICENSE)
-- **Obtaining a Device Lease**: contact sales@harmoneyes.com
+- **Obtaining an API key**: contact sales@harmoneyes.com
 
 ## Support
 
