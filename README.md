@@ -167,7 +167,7 @@ sdk.stop_processing();
 
 See [`examples/quickstart.cpp`](examples/quickstart.cpp). The whole API, with a
 line of documentation per call, is in
-[`harmoneyes/theia.hpp`](include/harmoneyes/theia.hpp).
+[`harmoneyes/theia.hpp`](vendor/include/harmoneyes/theia.hpp).
 
 Failures are reported as exceptions: catch `std::exception` to handle them
 all, or `het::LeaseVerificationError` for lease problems. Use a `TheiaSDK` from

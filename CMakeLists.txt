@@ -6,8 +6,8 @@ project(HarmonEyesNative
     LANGUAGES CXX)
 
 # This project builds nothing of its own. The SDK is the vendored Theia library
-# plus the header-only C++ layer in include/. Everything here exists only so the
-# bundled examples can be built from a clone.
+# plus the header-only C++ layer in vendor/include/. Everything here exists only
+# so the bundled examples can be built from a clone.
 #
 # Customers do not build this repository. They point find_package at it:
 #

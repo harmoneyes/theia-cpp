@@ -76,7 +76,7 @@ set(HarmonEyesNative_PLATFORM "${_hen_platform}")
 
 set(_hen_libdir  "${HARMONEYES_NATIVE_ROOT}/vendor/${_hen_platform}")
 set(_hen_libpath "${_hen_libdir}/${_hen_libname}")
-set(_hen_includes "${HARMONEYES_NATIVE_ROOT}/include" "${HARMONEYES_NATIVE_ROOT}/vendor/include")
+set(_hen_includes "${HARMONEYES_NATIVE_ROOT}/vendor/include")
 
 # The binaries are stored with Git LFS. A clone without it leaves a ~130-byte
 # text pointer in place of each one, so EXISTS alone cannot tell "absent"
