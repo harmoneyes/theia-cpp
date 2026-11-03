@@ -36,4 +36,4 @@ jobs:
           prerelease=()
           if [[ "${tag}" == *-* ]]; then prerelease=(--prerelease); fi
           gh release create "${tag}" --target "${SHA}" --title "${tag}" --generate-notes "${prerelease[@]}" \
-            --notes "Install: \`git clone --branch ${tag} https://github.com/harmoneyes/HarmonEyesNative.git\` (with Git LFS installed)."
+            --notes "Install: \`git clone --branch ${tag} https://github.com/${GITHUB_REPOSITORY}.git\` (with Git LFS installed)."

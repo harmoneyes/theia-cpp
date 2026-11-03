@@ -12,15 +12,16 @@ the release you want rather than `main`, which moves between releases:
 
 ```bash
 git lfs install            # once per machine; the binaries are stored with Git LFS
-git clone --branch v2.2.2 https://github.com/harmoneyes/HarmonEyesNative.git
+git clone --branch v2.2.2 https://github.com/harmoneyes/theia-cpp.git
 ```
 
-There is no build or install step: point CMake at the clone. The version in
-`find_package` is optional. It accepts that release or any later one with the
-same major version, so `1.1` accepts 1.1.1 and 1.4 but not 2.0.
+There is no build or install step: point CMake at the clone. The CMake
+package keeps this repository's earlier name, `HarmonEyesNative`. The version
+in `find_package` is optional. It accepts that release or any later one with
+the same major version, so `1.1` accepts 1.1.1 and 1.4 but not 2.0.
 
 ```cmake
-find_package(HarmonEyesNative 2.2 REQUIRED PATHS /path/to/HarmonEyesNative)
+find_package(HarmonEyesNative 2.2 REQUIRED PATHS /path/to/theia-cpp)
 
 add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE HarmonEyesNative::theia)
