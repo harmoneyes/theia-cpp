@@ -12,7 +12,7 @@ the release you want rather than `main`, which moves between releases:
 
 ```bash
 git lfs install            # once per machine; the binaries are stored with Git LFS
-git clone --branch v2.1.0 https://github.com/harmoneyes/HarmonEyesNative.git
+git clone --branch v2.2.0 https://github.com/harmoneyes/HarmonEyesNative.git
 ```
 
 There is no build or install step: point CMake at the clone. The version in
@@ -20,7 +20,7 @@ There is no build or install step: point CMake at the clone. The version in
 same major version, so `1.1` accepts 1.1.1 and 1.4 but not 2.0.
 
 ```cmake
-find_package(HarmonEyesNative 2.1 REQUIRED PATHS /path/to/HarmonEyesNative)
+find_package(HarmonEyesNative 2.2 REQUIRED PATHS /path/to/HarmonEyesNative)
 
 add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE HarmonEyesNative::theia)
