@@ -2,7 +2,7 @@
 #
 # Makes the vendored Theia native library consumable as:
 #
-#   find_package(HarmonEyesNative REQUIRED PATHS /path/to/HarmonEyesNative)
+#   find_package(HarmonEyesNative REQUIRED PATHS /path/to/theia-cpp)
 #   target_link_libraries(my_app PRIVATE HarmonEyesNative::theia)
 #   harmoneyes_native_copy_runtime(my_app)
 #

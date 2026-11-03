@@ -11,7 +11,7 @@ project(HarmonEyesNative
 #
 # Customers do not build this repository. They point find_package at it:
 #
-#   find_package(HarmonEyesNative REQUIRED PATHS /path/to/HarmonEyesNative)
+#   find_package(HarmonEyesNative REQUIRED PATHS /path/to/theia-cpp)
 #   target_link_libraries(my_app PRIVATE HarmonEyesNative::theia)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
