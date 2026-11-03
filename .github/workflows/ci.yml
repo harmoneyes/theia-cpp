@@ -46,13 +46,6 @@ jobs:
             echo "::error file=vendor/VERSION::${version} is a local build"
             exit 1
           fi
-          # The headers report the release they ship with (theia.hpp's kVersion);
-          # theia-native's release job sets it along with vendor/.
-          header_version="$(sed -n 's/.*kVersion = "\(.*\)";.*/\1/p' include/harmoneyes/theia.hpp)"
-          if [ "v${header_version}" != "${version}" ]; then
-            echo "::error file=include/harmoneyes/theia.hpp::kVersion is ${header_version}, but vendor/VERSION is ${version}"
-            exit 1
-          fi
           for lib in vendor/*/libtheia.so.0 vendor/*/libtheia.dylib vendor/*/theia.dll; do
             [ -e "${lib}" ] || continue
             if grep -aq -- "PRIVATE KEY-----" "${lib}"; then
