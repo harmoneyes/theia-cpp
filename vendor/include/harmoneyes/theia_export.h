@@ -75,6 +75,14 @@ typedef struct {
 } attention_result_t;
 
 typedef struct {
+    int previous_level;
+    int new_level;
+    int reason;
+    int64_t timestamp_ns;
+    double previous_level_duration_sec;
+} attention_transition_event_t;
+
+typedef struct {
     int level;
     float confidence;
     float prob_high;
@@ -84,6 +92,14 @@ typedef struct {
     const char* model_label;
     double level_duration_sec;
 } cog_load_result_t;
+
+typedef struct {
+    int previous_level;
+    int new_level;
+    int reason;
+    int64_t timestamp_ns;
+    double previous_level_duration_sec;
+} cog_load_transition_event_t;
 
 typedef struct {
     int sample_rate;
@@ -102,6 +118,14 @@ typedef struct {
     int ttt_minutes;
     double level_duration_sec;
 } fatigue_result_t;
+
+typedef struct {
+    int previous_level;
+    int new_level;
+    int reason;
+    int64_t timestamp_ns;
+    double previous_level_duration_sec;
+} fatigue_transition_event_t;
 
 typedef struct {
     int64_t timestamp_ns;
@@ -156,6 +180,9 @@ typedef struct {
     int32_t screen_res_height_px;
     double head_pose_depth_cm;
     double head_pose_tz;
+    double gaze_yaw_deg;
+    double gaze_pitch_deg;
+    int8_t eyes_closed;
 } gaze_sample_t;
 
 typedef struct {
@@ -187,10 +214,40 @@ typedef struct {
 } mental_readiness_result_t;
 
 typedef struct {
+    double nominal_window_seconds;
+    double actual_window_length_seconds;
+    int previous_level;
+    int new_level;
+    int reason;
+    double mental_readiness_percentage;
+    int64_t timestamp_ns;
+    double previous_level_duration_sec;
+} mental_readiness_transition_event_t;
+
+typedef struct {
+    double nominal_window_seconds;
+    int64_t window_start_timestamp_ns;
+    int64_t window_end_timestamp_ns;
+    double low_cog_load_percentage;
+    double moderate_cog_load_percentage;
+    double high_cog_load_percentage;
+    double mental_readiness_percentage;
+    int level;
+    int predictions_in_window;
+    double level_duration_sec;
+} mental_readiness_window_measurement_t;
+
+typedef struct {
     const char* name;
     uint32_t version;
     const char* commit;
 } model_info_t;
+
+typedef struct {
+    const char* filter;
+    const char* webhook_url;
+    const char* webhook_headers;
+} subscription_options_t;
 
 typedef struct {
     const uint8_t* bgr_data;
@@ -204,6 +261,12 @@ typedef struct {
     size_t extradata_len;
     int is_keyframe;
 } video_frame_t;
+
+typedef struct {
+    const mental_readiness_window_measurement_t* windows;
+    size_t windows_count;
+    int64_t timestamp_ns;
+} mental_readiness_ace_result_t;
 
 typedef enum theia_error_code_t {
     THEIA_ERROR_NONE = 0,
@@ -225,6 +288,12 @@ typedef void (*theia_cog_load_callback_t)(cog_load_result_t result, void* user_d
 typedef void (*theia_fatigue_callback_t)(fatigue_result_t result, void* user_data);
 typedef void (*theia_alert_callback_t)(alert_event_t event, void* user_data);
 typedef void (*theia_lease_renewed_callback_t)(const char* lease_token, void* user_data);
+typedef void (*theia_attention_ace_callback_t)(attention_result_t result, void* user_data);
+typedef void (*theia_mental_readiness_ace_callback_t)(mental_readiness_ace_result_t result, void* user_data);
+typedef void (*theia_cog_load_transition_ace_callback_t)(cog_load_transition_event_t event, void* user_data);
+typedef void (*theia_fatigue_transition_ace_callback_t)(fatigue_transition_event_t event, void* user_data);
+typedef void (*theia_attention_transition_ace_callback_t)(attention_transition_event_t event, void* user_data);
+typedef void (*theia_mental_readiness_transition_ace_callback_t)(mental_readiness_transition_event_t event, void* user_data);
 
 typedef struct {
     const void* reserved_0;
@@ -240,51 +309,51 @@ typedef struct {
     void* reserved_6;
     theia_fatigue_callback_t fatigue_callback;
     void* fatigue_callback_user_data;
+    theia_attention_ace_callback_t attention_ace_callback;
+    void* attention_ace_callback_user_data;
+    theia_mental_readiness_ace_callback_t mental_readiness_ace_callback;
+    void* mental_readiness_ace_callback_user_data;
+    theia_cog_load_transition_ace_callback_t cog_load_transition_ace_callback;
+    void* cog_load_transition_ace_callback_user_data;
+    theia_fatigue_transition_ace_callback_t fatigue_transition_ace_callback;
+    void* fatigue_transition_ace_callback_user_data;
+    theia_attention_transition_ace_callback_t attention_transition_ace_callback;
+    void* attention_transition_ace_callback_user_data;
+    theia_mental_readiness_transition_ace_callback_t mental_readiness_transition_ace_callback;
+    void* mental_readiness_transition_ace_callback_user_data;
+    theia_log_callback_t log_callback;
+    void* log_callback_user_data;
     void (*reserved_7)(void);
     void* reserved_8;
     void (*reserved_9)(void);
     void* reserved_10;
-    void (*reserved_11)(void);
-    void* reserved_12;
-    void (*reserved_13)(void);
-    void* reserved_14;
-    void (*reserved_15)(void);
-    void* reserved_16;
-    void (*reserved_17)(void);
-    void* reserved_18;
-    theia_log_callback_t log_callback;
-    void* log_callback_user_data;
-    void (*reserved_19)(void);
-    void* reserved_20;
-    void (*reserved_21)(void);
-    void* reserved_22;
-    const void* reserved_23;
-    const void* reserved_24;
+    const void* reserved_11;
+    const void* reserved_12;
     int disable_cog_load_model;
-    int reserved_25;
-    const void* reserved_26;
-    int reserved_27;
-    const void* reserved_28;
-    int reserved_29;
-    const void* reserved_30;
-    int reserved_31;
-    const void* reserved_32;
+    int reserved_13;
+    const void* reserved_14;
+    int reserved_15;
+    const void* reserved_16;
+    int reserved_17;
+    const void* reserved_18;
+    int reserved_19;
+    const void* reserved_20;
     int disable_fatigue_model;
-    const void* reserved_33;
+    const void* reserved_21;
     const char* model_cache_dir;
-    const void* reserved_34;
-    const void* reserved_35;
+    const void* reserved_22;
+    const void* reserved_23;
     const char* lease_token;
     const char* lease_expected_device_id;
     const char* lease_expected_tenant_id;
-    const void* reserved_36;
-    void (*reserved_37)(void);
-    void* reserved_38;
-    void (*reserved_39)(void);
-    void* reserved_40;
-    void (*reserved_41)(void);
-    void* reserved_42;
-    const void* reserved_43;
+    const char* rpc_config_path;
+    void (*reserved_24)(void);
+    void* reserved_25;
+    void (*reserved_26)(void);
+    void* reserved_27;
+    void (*reserved_28)(void);
+    void* reserved_29;
+    const void* reserved_30;
     const char* lease_file;
     const char* lease_api_key_id;
     const char* lease_api_key_secret;
@@ -293,7 +362,48 @@ typedef struct {
     int disable_lease_auto_renew;
     theia_lease_renewed_callback_t lease_renewed_callback;
     void* lease_renewed_callback_user_data;
+    int disable_rpc_server;
 } options_t;
+
+typedef struct {
+    theia_cog_load_callback_t callback;
+    void* user_data;
+} theia_cog_load_handler_t;
+
+typedef struct {
+    theia_fatigue_callback_t callback;
+    void* user_data;
+} theia_fatigue_handler_t;
+
+typedef struct {
+    theia_attention_ace_callback_t callback;
+    void* user_data;
+} theia_attention_ace_handler_t;
+
+typedef struct {
+    theia_mental_readiness_ace_callback_t callback;
+    void* user_data;
+} theia_mental_readiness_ace_handler_t;
+
+typedef struct {
+    theia_cog_load_transition_ace_callback_t callback;
+    void* user_data;
+} theia_cog_load_transition_ace_handler_t;
+
+typedef struct {
+    theia_fatigue_transition_ace_callback_t callback;
+    void* user_data;
+} theia_fatigue_transition_ace_handler_t;
+
+typedef struct {
+    theia_attention_transition_ace_callback_t callback;
+    void* user_data;
+} theia_attention_transition_ace_handler_t;
+
+typedef struct {
+    theia_mental_readiness_transition_ace_callback_t callback;
+    void* user_data;
+} theia_mental_readiness_transition_ace_handler_t;
 
 theia_error_code_t theia_get_last_error_code(void);
 const char* theia_get_last_error_message(void);
@@ -319,6 +429,9 @@ int theia_sdk_get_video_frame(const theia_sdk_t* sdk, video_frame_t* out);
 int theia_sdk_set_ganzin_connection(theia_sdk_t* sdk, const char* ip, int port, int rtsp_port);
 int theia_sdk_set_fatigue_time_offset_seconds(theia_sdk_t* sdk, double seconds);
 int theia_sdk_set_mental_readiness_min_session_seconds(theia_sdk_t* sdk, double seconds);
+int theia_sdk_set_mental_readiness_low_high_threshold(theia_sdk_t* sdk, double threshold);
+int theia_sdk_set_mental_readiness_report_windows(theia_sdk_t* sdk, double* nominal_window_seconds_list, size_t nominal_window_seconds_list_count);
+int theia_sdk_get_mental_readiness_report_windows(theia_sdk_t* sdk, const double** out, size_t* out_count);
 int theia_sdk_set_cog_load_model_settings(theia_sdk_t* sdk, int consensus_window_size, float consensus_threshold, float low_confidence_threshold, float high_confidence_threshold);
 int theia_sdk_set_graph_start_time(theia_sdk_t* sdk, double unix_seconds);
 int theia_sdk_get_model_info(const theia_sdk_t* sdk, const model_info_t** out, size_t* out_count);
@@ -340,6 +453,16 @@ int theia_sdk_set_lease_token(theia_sdk_t* sdk, const char* lease_token);
 int theia_sdk_renew_lease(theia_sdk_t* sdk);
 lease_info_t theia_sdk_get_lease_info(const theia_sdk_t* sdk);
 const char* theia_machine_device_identifier(void);
+const char* theia_sdk_get_device_name(const theia_sdk_t* sdk);
+uint64_t theia_sdk_subscribe_cog_load_ace(theia_sdk_t* sdk, const theia_cog_load_handler_t* handlers, size_t handlers_count, subscription_options_t options);
+uint64_t theia_sdk_subscribe_fatigue(theia_sdk_t* sdk, const theia_fatigue_handler_t* handlers, size_t handlers_count, subscription_options_t options);
+uint64_t theia_sdk_subscribe_attention_ace(theia_sdk_t* sdk, const theia_attention_ace_handler_t* handlers, size_t handlers_count, subscription_options_t options);
+uint64_t theia_sdk_subscribe_mental_readiness_ace(theia_sdk_t* sdk, const theia_mental_readiness_ace_handler_t* handlers, size_t handlers_count, subscription_options_t options);
+uint64_t theia_sdk_subscribe_cog_load_transition_ace(theia_sdk_t* sdk, const theia_cog_load_transition_ace_handler_t* handlers, size_t handlers_count, subscription_options_t options);
+uint64_t theia_sdk_subscribe_fatigue_transition_ace(theia_sdk_t* sdk, const theia_fatigue_transition_ace_handler_t* handlers, size_t handlers_count, subscription_options_t options);
+uint64_t theia_sdk_subscribe_attention_transition_ace(theia_sdk_t* sdk, const theia_attention_transition_ace_handler_t* handlers, size_t handlers_count, subscription_options_t options);
+uint64_t theia_sdk_subscribe_mental_readiness_transition_ace(theia_sdk_t* sdk, const theia_mental_readiness_transition_ace_handler_t* handlers, size_t handlers_count, subscription_options_t options);
+int theia_sdk_unsubscribe(theia_sdk_t* sdk, uint64_t subscription_id);
 
 #ifdef __cplusplus
 }
