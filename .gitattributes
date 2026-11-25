@@ -6,3 +6,5 @@
 *.dylib filter=lfs diff=lfs merge=lfs -text
 *.dll   filter=lfs diff=lfs merge=lfs -text
 *.lib   filter=lfs diff=lfs merge=lfs -text
+# The iOS framework binary has no extension, so it needs its own pattern.
+vendor/ios/**/Theia.framework/Theia filter=lfs diff=lfs merge=lfs -text

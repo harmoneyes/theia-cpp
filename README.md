@@ -217,7 +217,8 @@ the rest:
 - **[Git LFS](https://git-lfs.com)**, to fetch the binaries.
 - **Platforms:** Linux x86_64 and aarch64 (arm64) with glibc 2.35 or later,
   macOS 14 or later on Apple silicon, and Windows x86_64. CMake reports
-  clearly if your platform is not in a release.
+  clearly if your platform is not in a release. Android and iOS binaries ship
+  as files only; see [Android and iOS](#android-and-ios).
 - **On Linux,** the system's libcurl 4, OpenSSL 3 and CA certificates.
   Ubuntu 22.04+ and Debian 12+ ship them; minimal and container images may
   not, so install them with `apt install libcurl4 libssl3 ca-certificates`.
@@ -348,6 +349,20 @@ install(FILES $<TARGET_FILE:HarmonEyesNative::theia> DESTINATION bin)
 - **Windows:** ship `theia.dll` beside your `.exe`; `theia.lib` is only for
   linking. The target machine needs the Visual C++ Redistributable
   (2015-2022, x64), which you can bundle Microsoft's installer for.
+
+### Android and iOS
+
+Most apps should use the HarmonEyes Android and iOS SDKs. For C and C++ code
+that calls the SDK directly, releases also carry the mobile binaries. They are
+not part of the CMake package.
+
+| Platform | Files | Supports |
+|---|---|---|
+| Android | `vendor/android-arm64-v8a/libtheia.so`, with its own header at `vendor/android-arm64-v8a/include/harmoneyes/theia_export.h` | `arm64-v8a`, API level 21 (Android 5.0) or later |
+| iOS | `vendor/ios/Theia.xcframework` (device and simulator) | iOS 16.0 or later |
+
+Use Android's own `theia_export.h` in place of the one in `vendor/include`;
+the C++ headers in `vendor/include` work with either.
 
 ### Environment variables
 
