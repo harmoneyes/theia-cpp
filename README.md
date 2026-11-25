@@ -217,8 +217,8 @@ the rest:
 - **[Git LFS](https://git-lfs.com)**, to fetch the binaries.
 - **Platforms:** Linux x86_64 and aarch64 (arm64) with glibc 2.35 or later,
   macOS 14 or later on Apple silicon, and Windows x86_64. CMake reports
-  clearly if your platform is not in a release. Android and iOS binaries ship
-  as files only; see [Android and iOS](#android-and-ios).
+  clearly if your platform is not in a release. For Android and iOS, see
+  [Android and iOS](#android-and-ios).
 - **On Linux,** the system's libcurl 4, OpenSSL 3 and CA certificates.
   Ubuntu 22.04+ and Debian 12+ ship them; minimal and container images may
   not, so install them with `apt install libcurl4 libssl3 ca-certificates`.
@@ -353,8 +353,7 @@ install(FILES $<TARGET_FILE:HarmonEyesNative::theia> DESTINATION bin)
 ### Android and iOS
 
 Most apps should use the HarmonEyes Android and iOS SDKs. For C and C++ code
-that calls the SDK directly, releases also carry the mobile binaries. They are
-not part of the CMake package.
+that calls the SDK directly, releases also carry the mobile binaries.
 
 | Platform | Files | Supports |
 |---|---|---|
