@@ -46,14 +46,32 @@ jobs:
             echo "::error file=vendor/VERSION::${version} is a local build"
             exit 1
           fi
-          for lib in vendor/*/libtheia.so.0 vendor/*/libtheia.dylib vendor/*/theia.dll; do
+          shopt -s globstar
+          ios_libs=(vendor/ios/**/Theia.framework/Theia)
+          if [ -d vendor/ios ] && [ ! -e "${ios_libs[0]}" ]; then
+            echo "::error file=vendor/ios::has no Theia.framework/Theia binary"
+            exit 1
+          fi
+          for lib in vendor/*/libtheia.so.0 vendor/*/libtheia.dylib vendor/*/theia.dll \
+                     vendor/android-*/libtheia.so "${ios_libs[@]}"; do
             [ -e "${lib}" ] || continue
             if grep -aq -- "PRIVATE KEY-----" "${lib}"; then
               echo "::error file=${lib}::contains a private key"
               exit 1
             fi
           done
-          for lib in vendor/linux-*/libtheia.so.0; do
+          for lib in "${ios_libs[@]}"; do
+            [ -e "${lib}" ] || continue
+            if ! file "${lib}" | grep -q "Mach-O"; then
+              echo "::error file=${lib}::is not a Mach-O binary"
+              exit 1
+            fi
+            if ! grep -aq -- "@rpath/Theia.framework/Theia" "${lib}"; then
+              echo "::error file=${lib}::does not have the install name @rpath/Theia.framework/Theia"
+              exit 1
+            fi
+          done
+          for lib in vendor/linux-*/libtheia.so.0 vendor/android-*/libtheia.so; do
             [ -e "${lib}" ] || continue
             if ! file "${lib}" | grep -q ", stripped"; then
               echo "::error file=${lib}::is not stripped"
