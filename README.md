@@ -103,12 +103,38 @@ Failures throw: catch `het::LeaseVerificationError` for lease problems, or
 | `get_fatigue_level()` | `level` (0=Alert, 1=Somewhat Fatigued, 2=Fatigued), `label`, `confidence`, time-to-transition | about every 2 minutes |
 | `get_attention_style()` | `level` (1=Narrow … 5=Broad), `label` | continuously |
 | `get_mental_readiness(elapsed_seconds)` | `low_percentage`, `moderate_percentage`, `high_percentage` of the session's cognitive load. Readiness is **High** while `low_percentage + moderate_percentage` is at least 50, **Low** otherwise. | continuously |
+| `get_eye_strain()` | `score` (0–100), `in_break`, `on_seconds_since_break`, and the session's `on_seconds`, `break_count` and `longest_on_seconds`. `Device::Screen` and `Device::Stasis` (a camera on one eye) only. | every second |
 
 Each returns an empty `std::optional` until a result is available.
 `get_cog_load()` and `get_fatigue_level()` return the newest result and clear
 it, so poll them about once a second and keep the last one, as the quick start
 does. To receive every result instead, set `Options::on_cog_load` and
 `Options::on_fatigue`; those callbacks run on the SDK's own threads.
+`get_eye_strain()` does not clear its result; `Options::on_eye_strain` is
+called from inside `add_gaze_samples()` each time it scores a second.
+
+### Eye strain
+
+Eye strain follows the 20-20-20 rule: every 20 minutes, look 20 feet away for
+20 seconds. The score rises from 0 to 100 over 20 minutes at the screen
+(`on_seconds_since_break`) and goes back to 0 after a break, 20 seconds in a
+row away (`in_break`). Looking away for less than that pauses it. It is a
+timer on screen time, not a measure of the eye.
+
+- **`Device::Screen`:** time at the screen is time with the gaze on the screen.
+- **`Device::Stasis`, a head-mounted camera on one eye:** the camera sees the
+  eye, not the screen, so time at the screen is the time the camera tracks the
+  eye with gaze near the wearer's usual direction. Closing the eyes, taking the
+  headset off, or looking well to the side for 20 seconds is a break. A look into the distance made by turning
+  the head, with the eyes centred, still counts as screen time, so the SDK
+  finds fewer breaks than the wearer took.
+
+```cpp
+if (auto strain = sdk.get_eye_strain()) {
+    std::cout << "Eye strain: " << strain->score << "/100"
+              << (strain->in_break ? " (on a break)" : "") << '\n';
+}
+```
 
 ## Your eye tracker
 
@@ -118,7 +144,7 @@ does. To receive every result instead, set `Options::on_cog_load` and
 | `Device::Ganzin` | Ganzin Sol | over the network, at the address you give it |
 | `Device::Screen` | a screen-based tracker, about 30 samples a second | you push its samples |
 | `Device::Headset` | a head-mounted tracker that reports where each eye points | you push its samples |
-| `Device::Stasis` | the Stasis head-mounted eye camera | you push its samples |
+| `Device::Stasis` | a head-mounted camera that films one eye | you push its samples |
 
 ### Pupil Labs Neon and Ganzin Sol
 
@@ -191,9 +217,11 @@ the rest:
   from other headsets have not been validated, so contact
   support@harmoneyes.com before relying on them.
 
-#### Stasis eye camera: `Device::Stasis`
+#### Head-mounted camera on one eye: `Device::Stasis`
 
-`Device::Stasis` reads these from each `het::GazeSample`:
+For a head-mounted camera that films one eye and reports where it points.
+Its settings assume 60 frames a second. `Device::Stasis` reads these from
+each `het::GazeSample`:
 
 | Field | Set it to |
 |---|---|
@@ -206,8 +234,11 @@ the rest:
   tracking dropouts as blinks.
 - **Pupil diameter** is optional: `pupil_diameter_left` in millimetres, if your
   camera measures it.
+- **Eye strain** counts the time the camera tracks the eye; see
+  [Eye strain](#eye-strain). Send every frame, with or without gaze: frames
+  without gaze are how the SDK sees a closed eye or a headset taken off.
 - **The settings are provisional,** borrowed from head-mounted Tobii glasses,
-  and results have not been validated on Stasis recordings yet.
+  and results have not been validated on real recordings yet.
 
 ## Reference
 
@@ -385,6 +416,32 @@ bare array; anything else is rejected:
 ```json
 { "format": "theia-alert-rules", "version": 1, "etag": "\"v1\"", "rules": [] }
 ```
+
+### Upgrading from v2.2
+
+v2.3 adds eye strain: `get_eye_strain()` and `Options::on_eye_strain` (see
+[Eye strain](#eye-strain)). Nothing you already call changes.
+
+1. **Move your copy of this repository to the release:**
+
+   ```bash
+   git fetch --tags && git checkout v2.3.0 && git lfs pull
+   ```
+
+2. **Rebuild your application against it.** Don't replace `libtheia` on its
+   own: the options the headers hand the library grew in v2.3, so an
+   application built against v2.2's headers must not run with v2.3's library.
+   `find_package(HarmonEyesNative 2.2 ...)` already accepts v2.3; write `2.3`
+   to require eye strain.
+3. **Read eye strain** where you read the other results:
+
+   ```cpp
+   if (auto strain = sdk.get_eye_strain()) {
+       // strain->score: 0-100; strain->in_break; strain->on_seconds_since_break
+   }
+   ```
+
+   Or set `options.on_eye_strain` to be called with each second's result.
 
 ### Coming from the Python SDK
 
