@@ -72,6 +72,7 @@ typedef struct {
     double composite_score;
     int total_observations;
     double level_duration_sec;
+    const char* level_label;
 } attention_result_t;
 
 typedef struct {
@@ -80,6 +81,8 @@ typedef struct {
     int reason;
     int64_t timestamp_ns;
     double previous_level_duration_sec;
+    const char* previous_level_label;
+    const char* new_level_label;
 } attention_transition_event_t;
 
 typedef struct {
@@ -91,6 +94,7 @@ typedef struct {
     int64_t timestamp_ns;
     const char* model_label;
     double level_duration_sec;
+    const char* level_label;
 } cog_load_result_t;
 
 typedef struct {
@@ -99,6 +103,8 @@ typedef struct {
     int reason;
     int64_t timestamp_ns;
     double previous_level_duration_sec;
+    const char* previous_level_label;
+    const char* new_level_label;
 } cog_load_transition_event_t;
 
 typedef struct {
@@ -111,12 +117,27 @@ typedef struct {
 } config_t;
 
 typedef struct {
+    double score;
+    int64_t on_seconds_since_break;
+    int in_break;
+    int64_t on_seconds;
+    int64_t extra_screen_seconds;
+    int64_t on_seconds_at_max;
+    int break_count;
+    int max_reached_count;
+    int64_t longest_on_seconds;
+    double ramp_seconds;
+    int break_seconds;
+} eye_strain_result_t;
+
+typedef struct {
     int level;
     float confidence;
     int batch_number;
     int ttt_level;
     int ttt_minutes;
     double level_duration_sec;
+    const char* level_label;
 } fatigue_result_t;
 
 typedef struct {
@@ -125,6 +146,8 @@ typedef struct {
     int reason;
     int64_t timestamp_ns;
     double previous_level_duration_sec;
+    const char* previous_level_label;
+    const char* new_level_label;
 } fatigue_transition_event_t;
 
 typedef struct {
@@ -183,6 +206,25 @@ typedef struct {
     double gaze_yaw_deg;
     double gaze_pitch_deg;
     int8_t eyes_closed;
+    double eyelid_gap_left_px;
+    double eyelid_gap_right_px;
+    double iris_width_left_px;
+    double iris_width_right_px;
+    double eye_width_left_px;
+    double eye_width_right_px;
+    double head_pose_R00;
+    double head_pose_R10;
+    double head_pose_R20;
+    double head_pose_R01;
+    double head_pose_R11;
+    double head_pose_R21;
+    double head_pose_R02;
+    double head_pose_R12;
+    double head_pose_R22;
+    double head_pose_tx;
+    double head_pose_ty;
+    double face_present;
+    double blink_detected;
 } gaze_sample_t;
 
 typedef struct {
@@ -222,6 +264,8 @@ typedef struct {
     double mental_readiness_percentage;
     int64_t timestamp_ns;
     double previous_level_duration_sec;
+    const char* previous_level_label;
+    const char* new_level_label;
 } mental_readiness_transition_event_t;
 
 typedef struct {
@@ -235,6 +279,7 @@ typedef struct {
     int level;
     int predictions_in_window;
     double level_duration_sec;
+    const char* level_label;
 } mental_readiness_window_measurement_t;
 
 typedef struct {
@@ -294,6 +339,7 @@ typedef void (*theia_cog_load_transition_ace_callback_t)(cog_load_transition_eve
 typedef void (*theia_fatigue_transition_ace_callback_t)(fatigue_transition_event_t event, void* user_data);
 typedef void (*theia_attention_transition_ace_callback_t)(attention_transition_event_t event, void* user_data);
 typedef void (*theia_mental_readiness_transition_ace_callback_t)(mental_readiness_transition_event_t event, void* user_data);
+typedef void (*theia_eye_strain_callback_t)(eye_strain_result_t result, void* user_data);
 
 typedef struct {
     const void* reserved_0;
@@ -363,6 +409,9 @@ typedef struct {
     theia_lease_renewed_callback_t lease_renewed_callback;
     void* lease_renewed_callback_user_data;
     int disable_rpc_server;
+    const void* reserved_31;
+    theia_eye_strain_callback_t eye_strain_callback;
+    void* eye_strain_callback_user_data;
 } options_t;
 
 typedef struct {
@@ -419,6 +468,7 @@ int theia_sdk_is_tracker_connected(const theia_sdk_t* sdk);
 int theia_sdk_has_connection_timeout(const theia_sdk_t* sdk);
 int theia_sdk_get_cog_load_ace(const theia_sdk_t* sdk, cog_load_result_t* out);
 int theia_sdk_get_fatigue(const theia_sdk_t* sdk, fatigue_result_t* out);
+int theia_sdk_get_eye_strain(const theia_sdk_t* sdk, eye_strain_result_t* out);
 int theia_sdk_get_attention_ace(const theia_sdk_t* sdk, attention_result_t* out);
 int theia_sdk_get_mental_readiness_ace(const theia_sdk_t* sdk, double elapsed_seconds, mental_readiness_result_t* out);
 int theia_sdk_get_cog_load_prediction_history(const theia_sdk_t* sdk, const cog_load_result_t** out, size_t* out_count);
@@ -428,6 +478,7 @@ int theia_sdk_is_video_streaming(const theia_sdk_t* sdk);
 int theia_sdk_get_video_frame(const theia_sdk_t* sdk, video_frame_t* out);
 int theia_sdk_set_ganzin_connection(theia_sdk_t* sdk, const char* ip, int port, int rtsp_port);
 int theia_sdk_set_fatigue_time_offset_seconds(theia_sdk_t* sdk, double seconds);
+int theia_sdk_set_session_timezone(theia_sdk_t* sdk, const char* timezone);
 int theia_sdk_set_mental_readiness_min_session_seconds(theia_sdk_t* sdk, double seconds);
 int theia_sdk_set_mental_readiness_low_high_threshold(theia_sdk_t* sdk, double threshold);
 int theia_sdk_set_mental_readiness_report_windows(theia_sdk_t* sdk, double* nominal_window_seconds_list, size_t nominal_window_seconds_list_count);
@@ -453,6 +504,7 @@ int theia_sdk_set_lease_token(theia_sdk_t* sdk, const char* lease_token);
 int theia_sdk_renew_lease(theia_sdk_t* sdk);
 lease_info_t theia_sdk_get_lease_info(const theia_sdk_t* sdk);
 const char* theia_machine_device_identifier(void);
+const char* theia_sdk_get_tobii_license(const theia_sdk_t* sdk, const char* platform);
 const char* theia_sdk_get_device_name(const theia_sdk_t* sdk);
 uint64_t theia_sdk_subscribe_cog_load_ace(theia_sdk_t* sdk, const theia_cog_load_handler_t* handlers, size_t handlers_count, subscription_options_t options);
 uint64_t theia_sdk_subscribe_fatigue(theia_sdk_t* sdk, const theia_fatigue_handler_t* handlers, size_t handlers_count, subscription_options_t options);
