@@ -34,26 +34,6 @@ inline std::string machine_device_identifier()
     return id ? std::string{id} : std::string{};
 }
 
-inline const char* to_string(CogLoadLevel level) noexcept
-{
-    switch (level) {
-        case CogLoadLevel::Low:      return "Low";
-        case CogLoadLevel::Moderate: return "Moderate";
-        case CogLoadLevel::High:     return "High";
-    }
-    return "Unknown";
-}
-
-inline const char* to_string(FatigueLevel level) noexcept
-{
-    switch (level) {
-        case FatigueLevel::Alert:            return "Alert";
-        case FatigueLevel::SomewhatFatigued: return "Somewhat Fatigued";
-        case FatigueLevel::Fatigued:         return "Fatigued";
-    }
-    return "Unknown";
-}
-
 // GazeSample is passed to the library as a gaze_sample_t, so the two must
 // have identical layouts. Checked field by field, so a change on either side
 // fails the build instead of silently shifting what every field means.
@@ -120,6 +100,25 @@ HARMONEYES_THEIA_SAME_FIELD(head_pose_tz);
 HARMONEYES_THEIA_SAME_FIELD(gaze_yaw_deg);
 HARMONEYES_THEIA_SAME_FIELD(gaze_pitch_deg);
 HARMONEYES_THEIA_SAME_FIELD(eyes_closed);
+HARMONEYES_THEIA_SAME_FIELD(eyelid_gap_left_px);
+HARMONEYES_THEIA_SAME_FIELD(eyelid_gap_right_px);
+HARMONEYES_THEIA_SAME_FIELD(iris_width_left_px);
+HARMONEYES_THEIA_SAME_FIELD(iris_width_right_px);
+HARMONEYES_THEIA_SAME_FIELD(eye_width_left_px);
+HARMONEYES_THEIA_SAME_FIELD(eye_width_right_px);
+HARMONEYES_THEIA_SAME_FIELD(head_pose_R00);
+HARMONEYES_THEIA_SAME_FIELD(head_pose_R10);
+HARMONEYES_THEIA_SAME_FIELD(head_pose_R20);
+HARMONEYES_THEIA_SAME_FIELD(head_pose_R01);
+HARMONEYES_THEIA_SAME_FIELD(head_pose_R11);
+HARMONEYES_THEIA_SAME_FIELD(head_pose_R21);
+HARMONEYES_THEIA_SAME_FIELD(head_pose_R02);
+HARMONEYES_THEIA_SAME_FIELD(head_pose_R12);
+HARMONEYES_THEIA_SAME_FIELD(head_pose_R22);
+HARMONEYES_THEIA_SAME_FIELD(head_pose_tx);
+HARMONEYES_THEIA_SAME_FIELD(head_pose_ty);
+HARMONEYES_THEIA_SAME_FIELD(face_present);
+HARMONEYES_THEIA_SAME_FIELD(blink_detected);
 #undef HARMONEYES_THEIA_SAME_FIELD
 
 }  // namespace harmoneyes::theia
@@ -338,13 +337,14 @@ inline void check_succeeded(int rc, const char* context)
 {
     CogLoadResult r;
     r.level        = static_cast<CogLoadLevel>(c.level);
-    r.label        = to_string(r.level);
+    r.label        = copy_borrowed(c.level_label);
     r.confidence   = c.confidence;
     r.batch_number = c.batch_number;
     r.timestamp_ns = c.timestamp_ns;
     r.prob_high    = c.prob_high;
     r.prob_low     = c.prob_low;
     r.level_duration_sec = c.level_duration_sec;
+    r.level_label  = copy_borrowed(c.level_label);
     return r;
 }
 
@@ -352,13 +352,31 @@ inline void check_succeeded(int rc, const char* context)
 {
     FatigueResult r;
     r.level        = static_cast<FatigueLevel>(c.level);
-    r.label        = to_string(r.level);
+    r.label        = copy_borrowed(c.level_label);
     r.confidence   = c.confidence;
     r.batch_number = c.batch_number;
     // The C layer uses -1 for "absent".
     if (c.ttt_level >= 0)   { r.ttt_level   = static_cast<FatigueLevel>(c.ttt_level); }
     if (c.ttt_minutes >= 0) { r.ttt_minutes = c.ttt_minutes; }
     r.level_duration_sec = c.level_duration_sec;
+    r.level_label  = copy_borrowed(c.level_label);
+    return r;
+}
+
+[[nodiscard]] inline EyeStrainResult to_eye_strain(const ::eye_strain_result_t& c)
+{
+    EyeStrainResult r;
+    r.score                  = c.score;
+    r.on_seconds_since_break = c.on_seconds_since_break;
+    r.in_break               = c.in_break != 0;
+    r.on_seconds             = c.on_seconds;
+    r.extra_screen_seconds   = c.extra_screen_seconds;
+    r.on_seconds_at_max      = c.on_seconds_at_max;
+    r.break_count            = c.break_count;
+    r.max_reached_count      = c.max_reached_count;
+    r.longest_on_seconds     = c.longest_on_seconds;
+    r.ramp_seconds           = c.ramp_seconds;
+    r.break_seconds          = c.break_seconds;
     return r;
 }
 
@@ -370,6 +388,7 @@ inline void check_succeeded(int rc, const char* context)
     r.composite_score    = c.composite_score;
     r.total_observations = c.total_observations;
     r.level_duration_sec = c.level_duration_sec;
+    r.level_label        = copy_borrowed(c.level_label);
     return r;
 }
 
@@ -397,6 +416,7 @@ to_window(const ::mental_readiness_window_measurement_t& c)
     w.level                        = static_cast<MentalReadinessLevel>(c.level);
     w.predictions_in_window        = c.predictions_in_window;
     w.level_duration_sec           = c.level_duration_sec;
+    w.level_label                  = copy_borrowed(c.level_label);
     return w;
 }
 
@@ -425,6 +445,8 @@ template <typename Event, typename CEvent>
     e.reason                      = static_cast<TransitionReason>(c.reason);
     e.timestamp_ns                = c.timestamp_ns;
     e.previous_level_duration_sec = c.previous_level_duration_sec;
+    e.previous_level_label        = copy_borrowed(c.previous_level_label);
+    e.new_level_label             = copy_borrowed(c.new_level_label);
     return e;
 }
 
@@ -440,6 +462,8 @@ to_mental_readiness_transition(const ::mental_readiness_transition_event_t& c)
     e.mental_readiness_percentage  = c.mental_readiness_percentage;
     e.timestamp_ns                 = c.timestamp_ns;
     e.previous_level_duration_sec  = c.previous_level_duration_sec;
+    e.previous_level_label         = copy_borrowed(c.previous_level_label);
+    e.new_level_label              = copy_borrowed(c.new_level_label);
     return e;
 }
 
@@ -754,6 +778,13 @@ struct TheiaSDK::State {
         try { self->options.on_lease_renewed(detail::copy_borrowed(lease_token)); } catch (...) {}
     }
 
+    static void on_eye_strain(::eye_strain_result_t result, void* user_data) noexcept
+    {
+        auto* self = static_cast<State*>(user_data);
+        if (self == nullptr || !self->options.on_eye_strain) { return; }
+        try { self->options.on_eye_strain(detail::to_eye_strain(result)); } catch (...) {}
+    }
+
     static void on_alert(::alert_event_t event, void* user_data) noexcept
     {
         auto* self = static_cast<State*>(user_data);
@@ -836,6 +867,10 @@ inline TheiaSDK::TheiaSDK(Options options)
     if (o.on_lease_renewed) {
         c.lease_renewed_callback           = &State::on_lease_renewed;
         c.lease_renewed_callback_user_data = state_.get();
+    }
+    if (o.on_eye_strain) {
+        c.eye_strain_callback           = &State::on_eye_strain;
+        c.eye_strain_callback_user_data = state_.get();
     }
 
     // output_dir stays null: the SDK writes no session data to disk.
@@ -1028,6 +1063,15 @@ inline std::optional<FatigueResult> TheiaSDK::get_fatigue_level() const
         return std::nullopt;
     }
     return detail::to_fatigue(c);
+}
+
+inline std::optional<EyeStrainResult> TheiaSDK::get_eye_strain() const
+{
+    ::eye_strain_result_t c{};
+    if (!detail::check_optional(::theia_sdk_get_eye_strain(handle(), &c), "get_eye_strain")) {
+        return std::nullopt;
+    }
+    return detail::to_eye_strain(c);
 }
 
 inline std::optional<AttentionResult> TheiaSDK::get_attention_style() const

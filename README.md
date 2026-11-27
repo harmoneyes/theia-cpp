@@ -18,13 +18,13 @@ Clone a release. Each release is a tag; `main` moves between them.
 
 ```bash
 git lfs install            # once per machine; the binaries are stored with Git LFS
-git clone --branch v2.2.2 https://github.com/harmoneyes/theia-cpp.git
+git clone --branch v2.3.0 https://github.com/harmoneyes/theia-cpp.git
 ```
 
 There is nothing to build or install. Point CMake at the clone:
 
 ```cmake
-find_package(HarmonEyesNative 2.2 REQUIRED PATHS /path/to/theia-cpp)
+find_package(HarmonEyesNative 2.3 REQUIRED PATHS /path/to/theia-cpp)
 
 add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE HarmonEyesNative::theia)

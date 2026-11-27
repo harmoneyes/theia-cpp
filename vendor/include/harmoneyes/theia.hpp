@@ -32,7 +32,7 @@ namespace harmoneyes::theia {
 
 /// Version of these headers. version() is the native library you are
 /// running; include both when reporting a problem.
-inline constexpr std::string_view kVersion = "2.2.2";
+inline constexpr std::string_view kVersion = "2.3.0";
 
 /// Version of the native Theia library.
 [[nodiscard]] std::string version();
@@ -109,12 +109,6 @@ enum class TransitionReason : int {
     Changed        = 1,  ///< the level changed
 };
 
-/// "Low", "Moderate" or "High".
-[[nodiscard]] const char* to_string(CogLoadLevel level) noexcept;
-
-/// "Alert", "Somewhat Fatigued" or "Fatigued".
-[[nodiscard]] const char* to_string(FatigueLevel level) noexcept;
-
 // Durations below are in seconds of gaze time (the samples' timestamps), and
 // restart with each session.
 
@@ -128,6 +122,7 @@ struct CogLoadResult {
     float        prob_high    = 0.0F;  ///< the model's probability of high load, 0..1
     float        prob_low     = 0.0F;  ///< the model's probability of low load, 0..1
     double       level_duration_sec = 0.0;  ///< how long this level has held; 0 on its first prediction
+    std::string  level_label;          ///< level's name, from the SDK: "Low", "Moderate" or "High"
 };
 
 /// A fatigue prediction.
@@ -139,6 +134,7 @@ struct FatigueResult {
     std::optional<FatigueLevel> ttt_level;    ///< the level fatigue is heading towards
     std::optional<int>          ttt_minutes;  ///< estimated minutes until it gets there
     double                      level_duration_sec = 0.0;  ///< how long this level has held; 0 on its first prediction
+    std::string                 level_label;  ///< level's name, from the SDK: "Alert", "Somewhat Fatigued" or "Fatigued"
 };
 
 /// An attentional-style classification.
@@ -148,6 +144,31 @@ struct AttentionResult {
     double         composite_score    = 0.0;  ///< 0..1
     int            total_observations = 0;
     double         level_duration_sec = 0.0;  ///< how long this level has held; 0 on its first classification
+    std::string    level_label;               ///< level's name, from the SDK
+};
+
+/// Eye strain: a 0-100 score that rises with time at the screen (100 after
+/// ramp_seconds, 20 minutes) and resets after a break (break_seconds, 20 s,
+/// in a row away), the 20-20-20 rule. Device::Screen (the webcam) and
+/// Device::Stasis only.
+/// On Stasis, time at the screen is the time the camera tracks the eye with
+/// gaze near the wearer's usual direction, and a break is break_seconds with
+/// the eye closed or lost, or looking well away from it. A head turned to
+/// look away, with the eye centred, still counts as screen time, so treat the
+/// breaks it finds as fewer than the wearer took. It is a timer, not a
+/// measure of the eye.
+struct EyeStrainResult {
+    double       score                  = 0.0;    ///< now, 0-100
+    std::int64_t on_seconds_since_break = 0;      ///< now: screen time since the last break, not capped
+    bool         in_break               = false;  ///< now: away for break_seconds or more
+    std::int64_t on_seconds             = 0;      ///< the session's screen time
+    std::int64_t extra_screen_seconds   = 0;      ///< of it, on a monitor beside the main one (webcam)
+    std::int64_t on_seconds_at_max      = 0;      ///< of it, with the score at 100
+    int          break_count            = 0;      ///< breaks taken this session
+    int          max_reached_count      = 0;      ///< times the score reached 100
+    std::int64_t longest_on_seconds     = 0;      ///< the most screen time between two breaks
+    double       ramp_seconds           = 1200.0;
+    int          break_seconds          = 20;
 };
 
 /// How cognitive load has been distributed over the session so far.
@@ -176,6 +197,7 @@ struct MentalReadinessWindowMeasurement {
     MentalReadinessLevel level          = MentalReadinessLevel::Low;
     int    predictions_in_window        = 0;
     double level_duration_sec           = 0.0;  ///< how long this window's level has held
+    std::string level_label;                    ///< level's name, from the SDK: "Low" or "High"
 };
 
 /// Mental readiness over every configured report window, delivered with each
@@ -189,7 +211,8 @@ struct MentalReadinessWindowsResult {
 // -- Level changes ----------------------------------------------------------
 //
 // One event when a session's first level is known, then one each time the
-// level changes.
+// level changes. previous_level_label and new_level_label are the two levels'
+// names, from the SDK.
 
 struct CogLoadTransitionEvent {
     CogLoadLevel     previous_level = CogLoadLevel::Low;
@@ -197,6 +220,8 @@ struct CogLoadTransitionEvent {
     TransitionReason reason         = TransitionReason::SessionInitial;
     std::int64_t     timestamp_ns   = 0;
     double           previous_level_duration_sec = 0.0;  ///< how long previous_level lasted; 0 when session-initial
+    std::string      previous_level_label;
+    std::string      new_level_label;
 };
 
 struct FatigueTransitionEvent {
@@ -205,6 +230,8 @@ struct FatigueTransitionEvent {
     TransitionReason reason         = TransitionReason::SessionInitial;
     std::int64_t     timestamp_ns   = 0;
     double           previous_level_duration_sec = 0.0;  ///< how long previous_level lasted; 0 when session-initial
+    std::string      previous_level_label;
+    std::string      new_level_label;
 };
 
 struct AttentionTransitionEvent {
@@ -213,6 +240,8 @@ struct AttentionTransitionEvent {
     TransitionReason reason         = TransitionReason::SessionInitial;
     std::int64_t     timestamp_ns   = 0;
     double           previous_level_duration_sec = 0.0;  ///< how long previous_level lasted; 0 when session-initial
+    std::string      previous_level_label;
+    std::string      new_level_label;
 };
 
 /// Tracked per report window, so each window has its own session-initial
@@ -226,6 +255,8 @@ struct MentalReadinessTransitionEvent {
     double               mental_readiness_percentage  = 0.0;  ///< the window's readiness that produced new_level
     std::int64_t         timestamp_ns                 = 0;
     double               previous_level_duration_sec  = 0.0;  ///< how long previous_level lasted; 0 when session-initial
+    std::string          previous_level_label;
+    std::string          new_level_label;
 };
 
 /// One video frame. Carries raw BGR pixels, an encoded packet, or both,
@@ -360,9 +391,8 @@ inline constexpr double NON_COMPUTE_VALUE = -8888.0;
 /// sample the headset reports (200 Hz). Each optical axis is that eye's gaze
 /// direction in the head's frame (+x right, +y up, +z forward); set an eye's
 /// validity to 0 when the headset reports it invalid, and a pupil diameter to
-/// 0 when there is none. The quaternion is Hamilton, in Varjo's right-handed
-/// world: from Unity's left-handed rotation (x, y, z, w), that is
-/// (w, -x, -y, z). Leave it at its default when the head pose is not valid.
+/// 0 when there is none. The quaternion is Hamilton (w, x, y, z), in Varjo's
+/// right-handed world. Leave it at its default when the head pose is not valid.
 struct GazeSample {
     std::int64_t timestamp_ns = 0;  ///< capture time, nanoseconds since the Unix epoch
 
@@ -447,6 +477,44 @@ struct GazeSample {
     double gaze_pitch_deg = NON_COMPUTE_VALUE;
     // The tracker's own eyes-closed flag: 1 closed, 0 open, -1 not provided.
     std::int8_t eyes_closed = -1;
+
+    // MediaPipe FaceLandmarker eyelid geometry in raw image pixels, for the
+    // PARTICIPANT's left/right eye (webcam / Tobii-Nexus only). Send the three
+    // per eye and `face_present`; the SDK converts them to an aperture in
+    // millimetres itself. Leave them unset on every other tracker.
+    //
+    //   eyelid_gap   upper-to-lower lid distance
+    //   iris_width   horizontal iris diameter (the pixels-to-mm reference)
+    //   eye_width    outer-to-inner eye corner distance
+    double eyelid_gap_left_px   = NON_COMPUTE_VALUE;
+    double eyelid_gap_right_px  = NON_COMPUTE_VALUE;
+    double iris_width_left_px   = NON_COMPUTE_VALUE;
+    double iris_width_right_px  = NON_COMPUTE_VALUE;
+    double eye_width_left_px    = NON_COMPUTE_VALUE;
+    double eye_width_right_px   = NON_COMPUTE_VALUE;
+
+    // Head pose (webcam / Tobii-Nexus only): the head's rotation matrix in
+    // the camera frame (Rrc = row r, column c) and its x/y translation in
+    // centimetres. `head_pose_tz`, above, is the z translation. Leave them
+    // unset when there is no face.
+    double head_pose_R00 = NON_COMPUTE_VALUE;
+    double head_pose_R10 = NON_COMPUTE_VALUE;
+    double head_pose_R20 = NON_COMPUTE_VALUE;
+    double head_pose_R01 = NON_COMPUTE_VALUE;
+    double head_pose_R11 = NON_COMPUTE_VALUE;
+    double head_pose_R21 = NON_COMPUTE_VALUE;
+    double head_pose_R02 = NON_COMPUTE_VALUE;
+    double head_pose_R12 = NON_COMPUTE_VALUE;
+    double head_pose_R22 = NON_COMPUTE_VALUE;
+    double head_pose_tx  = NON_COMPUTE_VALUE;
+    double head_pose_ty  = NON_COMPUTE_VALUE;
+
+    // Per-frame flags (webcam / Tobii-Nexus only): 1 or 0, unset when there
+    // is no value. `face_present`: a face was found in
+    // this frame. `blink_detected`: the eyes are blinking in this frame; where
+    // it is set, the SDK takes its blinks from it instead of from missing gaze.
+    double face_present   = NON_COMPUTE_VALUE;
+    double blink_detected = NON_COMPUTE_VALUE;
 };
 
 /// A gaze source the SDK reads from, rather than a device it connects to
@@ -546,6 +614,9 @@ struct Options {
     /// Each lease the SDK renews or obtains, as it does. Only needed to keep
     /// the lease somewhere other than lease_file.
     std::function<void(const std::string&)>  on_lease_renewed;
+    /// Eye strain (Device::Screen and Device::Stasis), from inside
+    /// add_gaze_samples() each time it scores a second: about once a second.
+    std::function<void(const EyeStrainResult&)> on_eye_strain;
 };
 
 /// Settings for one TheiaSDK::subscribe_* subscription. Left empty, every
@@ -560,21 +631,25 @@ struct SubscriptionOptions {
     /// MentalReadinessWindowMeasurement, plus timestamp_ns), except the
     /// cognitive-load and fatigue `label`. Level changes add `direction`:
     /// 'increase', 'decrease', or 'unchanged' when session-initial. `reason`
-    /// is 'session-initial' or 'changed'. Levels are written by name and
-    /// compare in order: 'Low' < 'Moderate' < 'High' (cognitive load),
-    /// 'Alert' < 'Somewhat Fatigued' < 'Fatigued', 'Narrow' <
-    /// 'ModerateNarrow' < 'Neither' < 'ModerateBroad' < 'Broad', and
-    /// 'Low' < 'High' (mental readiness). An event lacking a field the filter
-    /// reads never matches.
+    /// is 'session-initial' or 'changed'. Level fields (level, previous_level,
+    /// new_level) are the level's value and compare in order: 0 Low <
+    /// 1 Moderate < 2 High (cognitive load), 0 Alert < 1 Somewhat Fatigued <
+    /// 2 Fatigued, 1 Narrow < 2 ModerateNarrow < 3 Neither < 4 ModerateBroad <
+    /// 5 Broad, and 0 Low < 1 High (mental readiness). Each has a
+    /// <field>_label (level_label, previous_level_label, new_level_label),
+    /// the level's name, which takes =, !=, IN and NOT IN only and must be
+    /// one of those names. An event lacking a field the filter reads never
+    /// matches.
     ///
     /// Mental readiness: a filter that does not name nominal_window_seconds
     /// tests only the shortest report window; naming it tests the windows it
     /// selects, whose values must equal configured windows exactly.
     ///
-    ///     "new_level = 'High' AND direction = 'increase'"
+    ///     "new_level_label = 'High' AND direction = 'increase'"
     ///     "direction = 'decrease' AND previous_level_duration_sec >= 600"
-    ///     "level = 'High' AND level_duration_sec > 300"
-    ///     "level IN ('Somewhat Fatigued', 'Fatigued')"
+    ///     "level_label = 'High' AND level_duration_sec > 300"
+    ///     "level >= 1"
+    ///     "level_label IN ('Somewhat Fatigued', 'Fatigued')"
     std::string filter;
     /// Also POST each event the filter passes here, as JSON. Must be https
     /// (http only to this machine). Sent from a queue on a thread of its own;
@@ -687,12 +762,16 @@ public:
     //
     // get_cog_load() and get_fatigue_level() return the newest result and
     // clear it, so a second call before the next result returns nothing.
-    // get_attention_style() and get_mental_readiness() report the running
-    // state and return the same value until it changes.
+    // get_attention_style(), get_mental_readiness() and get_eye_strain()
+    // report the running state and return the same value until it changes.
 
     [[nodiscard]] std::optional<CogLoadResult>   get_cog_load() const;
     [[nodiscard]] std::optional<FatigueResult>   get_fatigue_level() const;
     [[nodiscard]] std::optional<AttentionResult> get_attention_style() const;
+
+    /// Nothing before the session's first scored second, and nothing at all
+    /// on a device other than Device::Screen and Device::Stasis.
+    [[nodiscard]] std::optional<EyeStrainResult> get_eye_strain() const;
 
     /// `elapsed_seconds` of 0 uses the session clock.
     [[nodiscard]] std::optional<MentalReadinessResult> get_mental_readiness(double elapsed_seconds = 0.0) const;
